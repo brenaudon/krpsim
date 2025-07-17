@@ -1,0 +1,61 @@
+name: Docs
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  # ----------------------------------------------------------------
+  # 1. Build the documentation with Doxygen and upload as artifact
+  # ----------------------------------------------------------------
+  build_docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen & Graphviz
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y doxygen graphviz
+
+      # ---- Build HTML docs ---------------------------------------------------
+      - name: Generate Doxygen HTML
+        run: |
+          docs/generate_doxygen.sh
+
+      # ---- Ensure no links that Pages will reject ---------------------------
+      - name: Make link‑free copy for Pages
+        run: |
+          rm -rf site
+          mkdir -p site
+          cp -rLP docs/build/html/. site/
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+          name: github-pages
+
+  # ------------------------------------------------------------------
+  # 2. Deploy the artifact to GitHub Pages once the build job is green
+  # ------------------------------------------------------------------
+  deploy_docs:
+    runs-on: ubuntu-22.04
+    needs: build_docs
+
+    permissions:
+      pages: write      # to deploy to Pages
+      id-token: write   # for OIDC authentication
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages

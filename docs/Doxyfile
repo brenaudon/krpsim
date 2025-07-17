@@ -1,0 +1,23 @@
+# Doxyfile
+PROJECT_NAME           = "krpsim"
+OUTPUT_DIRECTORY       = build
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = YES
+RECURSIVE              = YES
+
+INPUT                  = ../include ../src
+FILE_PATTERNS          = *.hpp *.h *.cpp
+
+EXTRACT_ALL            = YES      # pick up items without doc-blocks too
+EXTRACT_STATIC         = YES      # include file-local / static functions
+EXTRACT_LOCAL_METHODS  = YES      # static member functions in .cpp files
+EXTRACT_LOCAL_CLASSES  = YES
+HIDE_UNDOC_MEMBERS     = NO       # show entries even if brief is missing
+HIDE_UNDOC_CLASSES     = NO
+
+# Produce nice URLs like /namespace/function.html
+GENERATE_TREEVIEW      = YES
+HTML_DYNAMIC_MENUS     = YES
+# Warn on undocumented things
+WARN_IF_UNDOCUMENTED   = YES
