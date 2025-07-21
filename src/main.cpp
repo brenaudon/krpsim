@@ -9,6 +9,7 @@
 
 #include "parsing.hpp"
 #include "helper.hpp"
+#include "krpsim.hpp"
 
 int main(int argc, char **argv) {
     if (argc != 2) {

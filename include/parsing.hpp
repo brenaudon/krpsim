@@ -6,42 +6,14 @@
  *  for a resource management system.
  */
 
-
 #ifndef PARSING_HPP
 #define PARSING_HPP
 
-#include <algorithm>
-#include <charconv>
-#include <cctype>
 #include <filesystem>
-#include <fstream>
-#include <iostream>
+#include <charconv>
 #include <regex>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
 
-///< @brief Represents an item for a process
-struct Item {
-    std::string    name;    ///< Name of the item.
-    int            qty;     ///< Quantity of the item needed or produced.
-};
-
-///< @brief Represents a process in the resource management system.
-struct Process {
-    std::string          name;      ///< Name of the process.
-    std::vector<Item>    needs;     ///< Items required for the process, each with a name and quantity.
-    std::vector<Item>    results;   ///< Items produced by the process, each with a name and quantity.
-    int                  delay;     ///< Delay in cycles for the process to complete.
-};
-
-///< @brief Configuration structure for the resource management system.
-struct Config {
-    std::unordered_map<std::string, int>    initialStocks;  ///< Initial stock of items, keyed by item name.
-    std::vector<Process>                    processes;      ///< List of processes, each with its name, needs, results, and delay.
-    std::vector<std::string>                optimizeKeys;   ///< List of keys to optimize, typically process names.
-};
+#include "krpsim.hpp"
 
 /**
  * @brief Parse the configuration from an input stream.

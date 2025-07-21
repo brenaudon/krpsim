@@ -9,8 +9,10 @@
 #ifndef HELPER_H
 #define HELPER_H
 
-#include "parsing.hpp"
+#include "krpsim.hpp"
 #include <string>
+#include <algorithm>
+#include <iostream>
 
 std::string ltrim(std::string s); ///< @brief Left trim a string
 std::string rtrim(std::string s); ///< @brief Right trim a string
