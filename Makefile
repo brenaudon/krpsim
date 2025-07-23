@@ -7,6 +7,7 @@ NAME			:=	krpsim
 SRC				:=	src/main.cpp		\
 					src/parsing.cpp		\
 					src/helper.cpp	\
+					src/compute.cpp		\
 
 SRC_OBJS		:=	$(SRC:%.cpp=.build/%.o)
 DEPS			:=	$(SRC_OBJS:%.o=%.d)
