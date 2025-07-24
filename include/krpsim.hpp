@@ -34,6 +34,7 @@ struct Config {
     std::unordered_map<std::string, int>    initialStocks;  ///< Initial stock of items, keyed by item name.
     std::vector<Process>                    processes;      ///< List of processes, each with its name, needs, results, and delay.
     std::vector<std::string>                optimizeKeys;   ///< List of keys to optimize, typically process names.
+    std::unordered_map<std::string,double>  weights;        ///< Weights for each stock, used in optimization calculations.
 };
 
 #endif //KRPSIM_HPP

@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <charconv>
 #include <regex>
+#include <queue>
 
 #include "krpsim.hpp"
 

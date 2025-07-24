@@ -58,8 +58,48 @@ static std::vector<Item> parse_item_list(std::string list) {
 ///< @brief Namespace for regex patterns used in parsing.
 namespace detail {
     const std::regex re_stock(R"(^\s*([^:#\s]+)\s*:\s*(\d+)\s*$)");
-    const std::regex re_process(R"(^\s*([^:]+?)\s*:\s*\(([^)]*)\)\s*:\s*\(([^)]*)\)\s*:\s*(\d+)\s*$)");
+    const std::regex re_process(R"(^\s*([^:]+?)\s*:\s*\(([^)]*)\)\s*:\s*\(([^)]*)\)\s*:\s*(\d+)\s*$)"); //TODO process can produce nothing
     const std::regex re_optimize(R"(^\s*optimize\s*:\s*\(([^)]*)\)\s*$)", std::regex::icase);
+}
+
+static std::unordered_map<std::string,double>
+build_reward_weights(const std::vector<Process>             &processes,
+                     const std::vector<std::string>         &optimizeKeys,
+                     double goalWeight, double minPrecursorWeight, double decay)
+{
+    // Map stock -> producer processes
+    std::unordered_map<std::string, std::vector<const Process*>> producers;
+    for (const Process &p : processes)
+        for (const Item &out : p.results)
+            producers[out.name].push_back(&p);
+
+    std::unordered_map<std::string,double> weight;
+    std::queue<std::pair<std::string,double>> q;
+
+    // Seed with goal stocks
+    for (const std::string &g : optimizeKeys) {
+        weight[g] = goalWeight;
+        q.push({g, goalWeight});
+    }
+
+    // BFS
+    while (!q.empty()) {
+        auto [stock, w] = q.front(); q.pop();
+        double nextW = std::max(minPrecursorWeight, w * decay);
+        if (nextW < minPrecursorWeight) continue; // nothing new to add
+
+        for (const Process *producer : producers[stock]) {
+            for (const Item &need : producer->needs) {
+                auto it = weight.find(need.name);
+                if (it == weight.end() || it->second < nextW) {
+                    weight[need.name] = nextW;
+                    q.push({need.name, nextW});
+                }
+            }
+        }
+    }
+
+    return weight;
 }
 
 
@@ -121,6 +161,8 @@ Config parse_config(std::istream &in) {
 
     if (cfg.optimizeKeys.empty())
         throw std::runtime_error("Missing optimize section");
+
+    cfg.weights = build_reward_weights(cfg.processes, cfg.optimizeKeys, 100.0, 1.0, 0.5);
 
     return cfg;
 }

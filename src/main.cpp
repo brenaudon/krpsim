@@ -38,8 +38,7 @@ int main(int argc, char **argv) {
     try {
         Config cfg = parse_config(in);
         print_config(cfg);
-        std::cout << "Running beam search with width 100 and max iterations 10000..." << std::endl;
-        std::cout << beam_search(cfg, 100, 10000) << std::endl;
+        // call search here
     } catch (const std::exception &e) {
         std::cerr << "Error: " << e.what() << '\n';
         return EXIT_FAILURE;

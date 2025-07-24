@@ -1,6 +1,7 @@
 #include "compute.hpp"
 
 #include <functional>
+#include <iostream>
 #include <queue>
 #include <vector>
 
@@ -64,35 +65,54 @@ static bool needs_satisfied(const std::unordered_map<std::string, int>& stocks, 
     return true;
 }
 
-static int heuristic(const Node& n, const std::vector<Process>& procs){
-    // Base = earliest finish among running procs, or current cycle if none
-    int h = n.running.empty() ? n.cycle : n.running.top().finish;
-
-    // Add the minimum delay of *runnable* processes (if any). This peeks one step ahead and
-    // usually guides the beam toward branches where something can complete sooner.
-    int bestDelay = INT32_MAX;
-    for(size_t pid = 0; pid < procs.size(); ++pid){
-        const Process &p = procs[pid];
-        bool ok = true;
-        for(const auto &need : p.needs){
-            auto it = n.stocks.find(need.name);
-            if(it == n.stocks.end() || it->second < need.qty){ ok = false; break; }
+static int heuristic(const Node &n, const std::vector<Process> &procs,
+                     bool optimizeTime,
+                     const std::vector<std::string> &rewardStocks,
+                     const std::unordered_map<std::string,double> &weight,
+                     double lambda) {
+    if (optimizeTime) {
+        int h = 0;
+        if (!n.running.empty()) {
+            h = std::max(0, n.running.top().finish - n.cycle);
+        } else {
+            int bestDelay = INT32_MAX;
+            for (const Process &p : procs)
+                if (needs_satisfied(n.stocks, p))
+                    bestDelay = std::min(bestDelay, p.delay);
+            if (bestDelay != INT32_MAX) h = bestDelay;
         }
-        if(ok) bestDelay = std::min(bestDelay, p.delay);
+        return h;
     }
-    if(bestDelay != INT32_MAX) h += bestDelay; // one optimistic step further
 
-    return h;
+    int reward = 0;
+    for (const auto &k : rewardStocks) {
+        auto it = n.stocks.find(k);
+        if (it == n.stocks.end()) continue;
+        auto wit = weight.find(k);
+        double w = (wit == weight.end()) ? 1.0 : wit->second;
+        reward += static_cast<int>(it->second * w);
+    }
+    return static_cast<int>(n.cycle * lambda - reward);
 }
 
 ///< @brief Comparator for nodes in the beam search, sorts by score in descending order
-struct NodeCmp{ bool operator()(const Node& a,const Node& b) const { return a.score > b.score; } };
+struct NodeCmp{ bool operator()(const Node& a, const Node& b) const { return a.score < b.score; } };
 
-int beam_search(const Config &cfg, int beam_width, int max_iter) {
+int beam_search(const Config &cfg, int beam_width, int max_iter, double lambda) {
+    const auto &procs = cfg.processes;
+
+    lambda = 0.0;
+
+    bool optimizeTime = (cfg.optimizeKeys.size()==1 && cfg.optimizeKeys[0]=="time");
+    std::vector<std::string> rewardStocks;
+    if(!optimizeTime) rewardStocks = cfg.optimizeKeys;
+
     Node root;
     root.stocks = cfg.initialStocks;
+    root.score = heuristic(root, procs, optimizeTime, rewardStocks, cfg.weights, lambda);
+    root.parent = nullptr; // root has no parent
     std::vector<Node> beam{root};
-    const auto &procs = cfg.processes;
+
 
     for(int it = 0; it < max_iter && !beam.empty(); ++it) {
         std::vector<Node> successors;
@@ -108,8 +128,14 @@ int beam_search(const Config &cfg, int beam_width, int max_iter) {
                 }
             }
 
-            if(!runnable && state.running.empty())
-                return state.cycle;
+            if(!runnable && state.running.empty()) {
+                if(optimizeTime) return state.cycle;  // makespan
+                int stockScore=0;
+                for(const auto &k: rewardStocks){ auto it=state.stocks.find(k); if(it!=state.stocks.end()) stockScore+=it->second; }
+                std::cout << "Final stocks: " << stockScore << " (cycle=" << state.cycle << ")\n";
+                return state.cycle; // returns cycles just for consistency
+            }
+
 
             // Launch runnable process
             for(size_t id = 0; id < procs.size(); ++id){
@@ -118,7 +144,7 @@ int beam_search(const Config &cfg, int beam_width, int max_iter) {
                 Node child = state;
                 apply_items(child.stocks, p.needs, -1);
                 child.running.push({child.cycle + p.delay, static_cast<int>(id)});
-                child.score = child.cycle + heuristic(child, procs);
+                child.score = child.cycle + heuristic(child, procs, optimizeTime, rewardStocks, cfg.weights, lambda);
                 child.parent = std::make_shared<Node>(stateRef);
                 successors.emplace_back(std::move(child));
             }
@@ -127,7 +153,7 @@ int beam_search(const Config &cfg, int beam_width, int max_iter) {
             if(!state.running.empty()){
                 Node wait=state;
                 wait.cycle = state.running.top().finish;
-                wait.score = wait.cycle + heuristic(wait, procs);
+                wait.score = wait.cycle + heuristic(wait, procs, optimizeTime, rewardStocks, cfg.weights, lambda);
                 wait.parent = std::make_shared<Node>(stateRef);
                 successors.emplace_back(std::move(wait));
             }
