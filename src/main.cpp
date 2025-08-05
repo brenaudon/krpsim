@@ -10,7 +10,7 @@
 #include "parsing.hpp"
 #include "helper.hpp"
 #include "krpsim.hpp"
-#include "compute.hpp"
+#include "genetic_algo.hpp"
 
 /**
  * @brief Main function for the krpsim executable.
@@ -38,7 +38,34 @@ int main(int argc, char **argv) {
     try {
         Config cfg = parse_config(in);
         print_config(cfg);
-        // call search here
+
+        std::vector<Process> proc_to_remove;
+        for (const auto &proc : cfg.processes) {
+            if (proc.results.empty()) {
+                proc_to_remove.push_back(proc);
+            }
+        }
+        // Remove processes with no results
+        for (Process proc : proc_to_remove) {
+            auto it = std::remove_if(cfg.processes.begin(), cfg.processes.end(),
+                                     [&proc](const Process &p) { return p.name == proc.name; });
+            cfg.processes.erase(it, cfg.processes.end());
+        }
+
+        Candidate best_candidate = solve_with_ga(cfg, 50000);
+        std::cout << "Simulation trace:\n";
+        for (const auto &entry : best_candidate.trace) {
+            std::cout << "Cycle " << entry.cycle << ": Start process " << cfg.processes[entry.procId].name << '\n';
+        }
+
+        std::cout << '\n';
+        std::cout << "Total cycles:" << best_candidate.cycle << "\n";
+
+        std::cout << '\n';
+        std::cout << "Final stocks:\n";
+        for (const auto &stock : best_candidate.stocks) {
+            std::cout << stock.first << ": " << stock.second << '\n';
+        }
     } catch (const std::exception &e) {
         std::cerr << "Error: " << e.what() << '\n';
         return EXIT_FAILURE;

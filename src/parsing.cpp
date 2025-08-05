@@ -62,46 +62,24 @@ namespace detail {
     const std::regex re_optimize(R"(^\s*optimize\s*:\s*\(([^)]*)\)\s*$)", std::regex::icase);
 }
 
-static std::unordered_map<std::string,double>
-build_reward_weights(const std::vector<Process>             &processes,
-                     const std::vector<std::string>         &optimizeKeys,
-                     double goalWeight, double minPrecursorWeight, double decay)
-{
-    // Map stock -> producer processes
-    std::unordered_map<std::string, std::vector<const Process*>> producers;
-    for (const Process &p : processes)
-        for (const Item &out : p.results)
-            producers[out.name].push_back(&p);
-
-    std::unordered_map<std::string,double> weight;
-    std::queue<std::pair<std::string,double>> q;
-
-    // Seed with goal stocks
-    for (const std::string &g : optimizeKeys) {
-        weight[g] = goalWeight;
-        q.push({g, goalWeight});
-    }
-
-    // BFS
-    while (!q.empty()) {
-        auto [stock, w] = q.front(); q.pop();
-        double nextW = std::max(minPrecursorWeight, w * decay);
-        if (nextW < minPrecursorWeight) continue; // nothing new to add
-
-        for (const Process *producer : producers[stock]) {
-            for (const Item &need : producer->needs) {
-                auto it = weight.find(need.name);
-                if (it == weight.end() || it->second < nextW) {
-                    weight[need.name] = nextW * need.qty / producer->results[0].qty; // scale by output
-                    q.push({need.name, nextW});
+void build_dist_map(const std::string goal, double depth, const std::vector<Process>& processes, std::unordered_map<std::string, double>& dist) {
+    for (const auto& proc : processes) {
+        for (const auto& item : proc.results) {
+            if (item.name == goal) {
+                bool deadend = true;
+                for (const auto& need : proc.needs) {
+                    if (dist.find(need.name) == dist.end()) {
+                        dist[need.name] = depth + 1.0;
+                        deadend = false;
+                    }
+                    if (!deadend) {
+                        build_dist_map(need.name, depth + 1, processes, dist);
+                    }
                 }
             }
         }
     }
-
-    return weight;
 }
-
 
 Config parse_config(std::istream &in) {
     Config cfg;
@@ -162,12 +140,15 @@ Config parse_config(std::istream &in) {
     if (cfg.optimizeKeys.empty())
         throw std::runtime_error("Missing optimize section");
 
-    cfg.weights = build_reward_weights(cfg.processes, cfg.optimizeKeys, 10.0, 0.001, 0.1);
-
-    // print weights
-    for (const auto &[stock, weight] : cfg.weights) {
-        std::cout << "Weight for '" << stock << "': " << weight << '\n';
+    std::unordered_map<std::string, double> dist;
+    for (const auto& goal : cfg.optimizeKeys) {
+        if (goal != "time") {
+            dist[goal] = 0.0;
+            build_dist_map(goal, 0.0, cfg.processes, dist);
+            break;
+        }
     }
+    cfg.dist = std::move(dist);
 
     return cfg;
 }
