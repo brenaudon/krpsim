@@ -10,6 +10,8 @@
 #include "helper.hpp"
 #include "parsing.hpp"
 
+#include <unordered_set>
+
 /**
  * @brief Parse a single item from a string in the format "name:qty".
  *
@@ -62,24 +64,101 @@ namespace detail {
     const std::regex re_optimize(R"(^\s*optimize\s*:\s*\(([^)]*)\)\s*$)", std::regex::icase);
 }
 
-void build_dist_map(const std::string goal, double depth, const std::vector<Process>& processes, std::unordered_map<std::string, double>& dist) {
-    for (const auto& proc : processes) {
-        for (const auto& item : proc.results) {
+void build_dist_map(const std::string goal, double depth, Config& cfg) {
+    for (const Process& proc : cfg.processes) {
+        for (const Item& item : proc.results) {
             if (item.name == goal) {
                 bool deadend = true;
-                for (const auto& need : proc.needs) {
-                    if (dist.find(need.name) == dist.end()) {
-                        dist[need.name] = depth + 1.0;
+                for (const Item& need : proc.needs) {
+                    if (cfg.dist.find(need.name) == cfg.dist.end()) {
+                        cfg.dist[need.name] = depth + 1.0;
                         deadend = false;
                     }
                     if (!deadend) {
-                        build_dist_map(need.name, depth + 1, processes, dist);
+                        build_dist_map(need.name, depth + 1, cfg);
                     }
                 }
             }
         }
     }
 }
+
+void detect_obvious_cycles(Config &cfg) {
+    std::vector<std::string> cycle_names;
+    std::unordered_map<std::string, bool> cycle_starts_from;
+
+    std::vector<Process>::iterator it = cfg.processes.begin();
+    while (it != cfg.processes.end()) {
+        Process proc = *it;
+        if (proc.results.empty()) {
+            ++it;
+            continue; // Skip processes that produce nothing
+        }
+        bool in_cycle = false;
+
+        // Back to cycle start
+        if (!cycle_names.empty() && cycle_names[0] == proc.name) {
+            std::cout << "\n";
+            for (const auto& name : cycle_names) {
+                for (Process& p : cfg.processes) {
+                    if (p.name == name) {
+                        p.in_cycle = true;
+                    }
+                }
+            }
+        }
+        // If the process is already in a cycle, cycle is done so clear and skip
+        if (std::find(cycle_names.begin(), cycle_names.end(), proc.name) != cycle_names.end()) {
+            std::vector<Process>::iterator temp_it = cfg.processes.begin();
+            while (temp_it != cfg.processes.end()) {
+                if (temp_it->name == cycle_names[0]) {
+                    break;
+                }
+                ++temp_it;
+            }
+            ++temp_it;
+            while (cycle_starts_from[temp_it->name] && temp_it != cfg.processes.end()) {
+                ++temp_it;
+            }
+            it = temp_it;
+            cycle_starts_from[temp_it->name] = true;
+            cycle_names.clear();
+            continue;
+        }
+        ++it;
+
+        std::vector<Process>::iterator sec_it = cfg.processes.begin();
+        Process sec_proc;
+        bool clear_cycles = true;
+        while (sec_it != cfg.processes.end()) {
+            sec_proc = *sec_it;
+            if (proc.results.size() == sec_proc.needs.size()) {
+                for (Item& item : proc.results) {
+                    if (std::find(sec_proc.needs.begin(), sec_proc.needs.end(), item) == sec_proc.needs.end()) {
+                        break;
+                    }
+                    if (item.name == proc.results[proc.results.size() - 1].name) {
+                        in_cycle = true;
+                    }
+                }
+                if (in_cycle) {
+                    cycle_names.push_back(proc.name);
+                    if (!cycle_starts_from[proc.name]) {
+                        cycle_starts_from[proc.name] = true;
+                    }
+                    it = sec_it;
+                    clear_cycles = false;
+                    break;
+                }
+            }
+            ++sec_it;
+        }
+        if (clear_cycles) {
+            cycle_names.clear();
+        }
+    }
+}
+
 
 Config parse_config(std::istream &in) {
     Config cfg;
@@ -140,15 +219,25 @@ Config parse_config(std::istream &in) {
     if (cfg.optimizeKeys.empty())
         throw std::runtime_error("Missing optimize section");
 
-    std::unordered_map<std::string, double> dist;
-    for (const auto& goal : cfg.optimizeKeys) {
+    for (const std::string& goal : cfg.optimizeKeys) {
         if (goal != "time") {
-            dist[goal] = 0.0;
-            build_dist_map(goal, 0.0, cfg.processes, dist);
+            cfg.dist[goal] = 0.0;
+            build_dist_map(goal, 0.0, cfg);
             break;
         }
     }
-    cfg.dist = std::move(dist);
+
+    // Remove processes producing nothing
+    std::vector<Process> processes_copy = cfg.processes;
+    for (const Process &proc : processes_copy) {
+        if (proc.results.empty()) {
+            auto it = std::remove_if(cfg.processes.begin(), cfg.processes.end(),
+                                     [&proc](const Process &p) { return p.name == proc.name; });
+            cfg.processes.erase(it, cfg.processes.end());
+        }
+    }
+
+    detect_obvious_cycles(cfg);
 
     return cfg;
 }

@@ -28,7 +28,7 @@ struct GeneticParameters {
     int maxCycles = 50000;      ///< Maximum number of cycles to run the simulation
     double mutationRate = 0.1;  ///< Percentage (0-100) of mutation in the genetic algorithm
     double score_alpha = 1.0;   ///< Weight for the target stock in the fitness function
-    double score_beta = 0.01;    ///< Weight for the other stocks in the fitness function
+    double score_beta = 0.1;    ///< Weight for the other stocks in the fitness function
     double score_decay = 0.7;   ///< Decay factor for the other
 };
 
@@ -54,7 +54,7 @@ static void apply_items(std::unordered_map<std::string, int>& stock, const std::
  */
 static void realise_finishes(Candidate &c, const std::vector<Process>& procs) {
     while (!c.running.empty() && c.running.top().finish <= c.cycle) {
-        int id = c.running.top().id; c.running.pop();
+        const int id = c.running.top().id; c.running.pop();
         apply_items(c.stocks, procs[id].results, +1);
     }
 }
@@ -66,10 +66,15 @@ static void realise_finishes(Candidate &c, const std::vector<Process>& procs) {
  * @param stocks The current stock of items, keyed by item name.
  * @param proc The process to check, containing its needs.
  */
-static bool needs_satisfied(const std::unordered_map<std::string, int>& stocks, const Process& proc){
-    for(auto &it:proc.needs) {
-        auto f=stocks.find(it.name);
-        if(f==stocks.end()||f->second<it.qty)
+static bool needs_satisfied(const std::unordered_map<std::string, int>& stocks, const Process& proc) {
+    for(auto &it: proc.needs) {
+        auto f = stocks.find(it.name);
+        if(f == stocks.end() || f->second < it.qty)
+            return false;
+    }
+    for(auto &it: proc.results) {
+        auto f = stocks.find(it.name);
+        if(f != stocks.end() && f->second > 10000 && it.name != "euro")
             return false;
     }
     return true;
@@ -111,7 +116,7 @@ void apply_process(Candidate &candidate, const Config cfg, int proc_id) {
  * @param parent2 The second parent candidate.
  * @return A new child candidate generated from the parents.
  */
-Candidate generate_child(const Config &cfg, const GeneticParameters &params, const Candidate &parent1, const Candidate &parent2) {
+Candidate generate_child(const Config &cfg, const GeneticParameters &params, std::optional<Candidate> parent1 = std::nullopt, std::optional<Candidate> parent2 = std::nullopt) {
     Candidate child;
     child.cycle = 0;
     child.stocks = cfg.initialStocks;
@@ -127,9 +132,23 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, con
         }
     }
 
+    int longest_proc_delay = 0;
+    for (const auto& proc : cfg.processes) {
+        auto it = std::find_if(proc.results.begin(), proc.results.end(),
+                                 [&target](const Item &item) { return item.name == target; });
+        if (it != proc.results.end() && proc.delay > longest_proc_delay) {
+            longest_proc_delay = proc.delay;
+        }
+    }
 
-    int parent1_size = static_cast<int>(parent1.trace.size());
-    int parent2_size = static_cast<int>(parent2.trace.size());
+    int parent1_size = 0;
+    int parent2_size = 0;
+    if (parent1.has_value()) {
+        parent1_size = static_cast<int>(parent1.value().trace.size());
+    }
+    if (parent2.has_value()) {
+        parent2_size = static_cast<int>(parent2.value().trace.size());
+    }
 
     while (child.cycle < params.maxCycles) {
         // Check if there are any runnable processes
@@ -151,14 +170,28 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, con
 
         std::vector<int> runnable_list_copy = runnable_list;
         for (int proc_id : runnable_list_copy) {
-            if (proc_id != -1) {
-                auto it = std::find_if(cfg.processes[proc_id].results.begin(), cfg.processes[proc_id].results.end(),
-                             [&target](const Item &item) { return item.name == target; });
-                if (it != cfg.processes[proc_id].results.end()) {
-                    for (int j = 0; j < 10; ++j) {
-                        runnable_list.push_back(proc_id); // Add the process multiple times to increase its chance of being selected
+            if (proc_id != -1 && cfg.processes[proc_id].in_cycle == true) {
+                runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), proc_id), runnable_list.end());
+            }
+        }
+        if (runnable_list.size() == 1 && runnable_list[0] == -1) {
+            runnable_list = runnable_list_copy;
+        }
+
+        if (child.cycle >= params.maxCycles - longest_proc_delay) {
+            std::vector<int> runnable_list_copy = runnable_list;
+            for (int proc_id : runnable_list_copy) {
+                if (proc_id != -1) {
+                    auto it = std::find_if(cfg.processes[proc_id].results.begin(), cfg.processes[proc_id].results.end(),
+                                 [&target](const Item &item) { return item.name == target; });
+                    if (it == cfg.processes[proc_id].results.end()) {
+                        runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), proc_id), runnable_list.end());
                     }
                 }
+            }
+            runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), -1), runnable_list.end());
+            if (runnable_list.empty()) {
+                runnable_list = runnable_list_copy;
             }
         }
 
@@ -166,15 +199,15 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, con
 
         // find parent1.trace[i].procId in runnable_list
         if (i < parent1_size // Check if i is within bounds
-            && std::find(runnable_list.begin(), runnable_list.end(), parent1.trace[i].procId) != runnable_list.end() // Check if parent1.trace[i].procId is runnable
+            && std::find(runnable_list.begin(), runnable_list.end(), parent1.value().trace[i].procId) != runnable_list.end() // Check if parent1.trace[i].procId is runnable
             && random_choice < 100 - params.mutationRate / 2) // check if we should use parent1
         {
-            apply_process(child, cfg, parent1.trace[i].procId);
+            apply_process(child, cfg, parent1.value().trace[i].procId);
         } else if (i < parent2_size
-            && std::find(runnable_list.begin(), runnable_list.end(), parent2.trace[i].procId) != runnable_list.end()
+            && std::find(runnable_list.begin(), runnable_list.end(), parent2.value().trace[i].procId) != runnable_list.end()
             && !(random_choice > 100 - params.mutationRate / 2))
         {
-            apply_process(child, cfg, parent2.trace[i].procId);
+            apply_process(child, cfg, parent2.value().trace[i].procId);
         } else { // mutate means random choice in runnable processes. Mutate if random_choice is greater than 100 - mutationRate or if parent_1 and parent_2 process at i are not runnable
             int proc_id = runnable_list[rand() % runnable_list.size()];
             apply_process(child, cfg, proc_id);
@@ -193,13 +226,7 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, con
  * @return A new candidate with a fully random trace.
  */
 Candidate generate_candidate(const Config &cfg, const GeneticParameters &params) {
-    Candidate parent1;
-    parent1.trace.clear();
-    Candidate parent2;
-    parent2.trace.clear();
-
-    // parent 1 and 2 empty trace so new candidate fully random
-    return generate_child(cfg, params, parent1, parent2);
+    return generate_child(cfg, params);
 }
 
 int score_candidate(const Candidate &candidate, const Config &cfg, const GeneticParameters &params) {
@@ -233,7 +260,6 @@ int score_candidate(const Candidate &candidate, const Config &cfg, const Genetic
 }
 
 
-
 Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
     GeneticParameters params;
     Candidate best_candidate;
@@ -242,9 +268,14 @@ Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
     // get start time
     auto start_time = std::chrono::steady_clock::now();
 
-
     std::vector<Candidate> candidates;
     for (int i = 0; i < params.populationSize; ++i) {
+        auto current_time = std::chrono::steady_clock::now();
+        auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count();
+        if (elapsed_time > timeBudgetMs) {
+            break;
+        }
+        //std::cout << "Generating candidate " << i + 1 << " of " << params.populationSize << std::endl;
         candidates.push_back(generate_candidate(cfg, params));
     }
 
@@ -266,9 +297,6 @@ Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
             return score_a > score_b;
         });
 
-        // // Keep the best half of the candidates
-        // std::vector<Candidate> next_generation(candidates.begin(), candidates.begin() + candidates.size() / 2);
-
         Candidate parent1 = candidates[0];
         Candidate parent2 = candidates[1];
 
@@ -280,8 +308,21 @@ Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
 
         // Generate new candidates by crossing over the best ones
         size_t pop_size = static_cast<size_t>(params.populationSize);
-        while (candidates.size() < pop_size) {
+        while (candidates.size() < pop_size / 2) {
+            auto current_time_ = std::chrono::steady_clock::now();
+            auto elapsed_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(current_time_ - start_time).count();
+            if (elapsed_time_ > timeBudgetMs) {
+                break;
+            }
             candidates.push_back(generate_child(cfg, params, parent1, parent2));
+        }
+        while (candidates.size() < pop_size) {
+            auto current_time_ = std::chrono::steady_clock::now();
+            auto elapsed_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(current_time_ - start_time).count();
+            if (elapsed_time_ > timeBudgetMs) {
+                break;
+            }
+            candidates.push_back(generate_candidate(cfg, params)); // Fill the rest with random candidates
         }
     }
 

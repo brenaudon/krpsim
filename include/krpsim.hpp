@@ -19,6 +19,10 @@
 struct Item {
     std::string    name;    ///< Name of the item.
     int            qty;     ///< Quantity of the item needed or produced.
+
+    bool operator==(const Item& other) const noexcept {
+        return name == other.name;
+    }
 };
 
 ///< @brief Represents a process in the resource management system.
@@ -27,6 +31,7 @@ struct Process {
     std::vector<Item>    needs;     ///< Items required for the process, each with a name and quantity.
     std::vector<Item>    results;   ///< Items produced by the process, each with a name and quantity.
     int                  delay;     ///< Delay in cycles for the process to complete.
+    bool                 in_cycle{};  ///< Whether the process is in an obvious cycle.
 };
 
 ///< @brief Configuration structure for the resource management system.

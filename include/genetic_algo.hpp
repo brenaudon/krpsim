@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <chrono>
+#include <optional>
 
 
 ///< @brief Represents a launch event in the simulation, containing a cycle and the ID of the process that starts at that cycle.
