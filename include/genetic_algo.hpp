@@ -1,3 +1,14 @@
+/*!
+ *  @file genetic_algo.hpp
+ *  @brief Header file for the genetic algorithm used in the krpsim simulation
+ *
+ * This file defines the structures and functions for implementing a genetic algorithm
+ * to find a near-optimal trace for the krpsim resource management simulation.
+ * It includes the definition of the Candidate structure, which represents a state in the simulation,
+ * as well as the solve_with_ga function that performs the genetic algorithm search.
+ * The function returns a Candidate object containing the best trace found during the search.
+ */
+
 #ifndef COMPUTE_GA_HPP
 #define COMPUTE_GA_HPP
 

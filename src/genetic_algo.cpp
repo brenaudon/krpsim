@@ -229,6 +229,15 @@ Candidate generate_candidate(const Config &cfg, const GeneticParameters &params)
     return generate_child(cfg, params);
 }
 
+
+/**
+ * @brief Function to score a candidate based on the configuration and genetic parameters.
+ *
+ * @param candidate The candidate to score.
+ * @param cfg The configuration containing the optimization keys and distance map.
+ * @param params The genetic parameters for scoring.
+ * @return An integer score for the candidate.
+ */
 int score_candidate(const Candidate &candidate, const Config &cfg, const GeneticParameters &params) {
 
     std::string target;
@@ -267,6 +276,8 @@ Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
 
     // get start time
     auto start_time = std::chrono::steady_clock::now();
+
+    srand(start_time.time_since_epoch().count());
 
     std::vector<Candidate> candidates;
     for (int i = 0; i < params.populationSize; ++i) {

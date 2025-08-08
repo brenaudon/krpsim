@@ -42,4 +42,4 @@ struct Config {
     std::unordered_map<std::string, double> dist;           ///< Distance of each stock item from the goal, keyed by item name.
 };
 
-#endif //KRPSIM_HPP
+#endif
