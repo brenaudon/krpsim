@@ -13,6 +13,7 @@
 #include <charconv>
 #include <regex>
 #include <queue>
+#include <unordered_set>
 
 #include "krpsim.hpp"
 

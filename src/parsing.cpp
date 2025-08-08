@@ -10,8 +10,6 @@
 #include "helper.hpp"
 #include "parsing.hpp"
 
-#include <unordered_set>
-
 /**
  * @brief Parse a single item from a string in the format "name:qty".
  *
@@ -64,6 +62,14 @@ namespace detail {
     const std::regex re_optimize(R"(^\s*optimize\s*:\s*\(([^)]*)\)\s*$)", std::regex::icase);
 }
 
+
+/**
+ * @brief Build a distance map for the given goal item, recursively updating the distances of its needs.
+ *
+ * @param goal The name of the goal item.
+ * @param depth The current depth in the recursion, used to calculate distances.
+ * @param cfg The configuration containing processes and their needs/results.
+ */
 void build_dist_map(const std::string goal, double depth, Config& cfg) {
     for (const Process& proc : cfg.processes) {
         for (const Item& item : proc.results) {
@@ -83,6 +89,17 @@ void build_dist_map(const std::string goal, double depth, Config& cfg) {
     }
 }
 
+
+/**
+ * @brief Detect obvious cycles in the processes by checking if a process can lead back to itself.
+ *
+ * This function iterates through the processes and checks if any process can lead back to itself
+ * through its results and needs, marking them as being in a cycle.
+ * We consider a cycle obvious if each process produce exactly the items needed by the next process until the first one is reached again.
+ *
+ *
+ * @param cfg The configuration containing the processes to check for cycles.
+ */
 void detect_obvious_cycles(Config &cfg) {
     std::vector<std::string> cycle_names;
     std::unordered_map<std::string, bool> cycle_starts_from;
@@ -160,6 +177,60 @@ void detect_obvious_cycles(Config &cfg) {
 }
 
 
+/**
+ * @brief Recursively select processes that produce the target item and their dependencies.
+ *
+ * This function traverses the processes in the configuration and selects those that produce
+ * the target item, recursively including all processes that are needed by them.
+ *
+ * @param cfg The configuration containing the processes.
+ * @param selected_processes A set to keep track of selected process names.
+ * @param target The target item to search for in the results of the processes.
+ */
+void select_processes_rec(Config &cfg, std::unordered_set<std::string>& selected_processes, const Item& target) {
+    for (const Process &proc : cfg.processes) {
+        if (std::find(proc.results.begin(), proc.results.end(), target) != proc.results.end()) {
+            if (selected_processes.find(proc.name) == selected_processes.end()) {
+                selected_processes.insert(proc.name);
+                for (const Item &need : proc.needs) {
+                    select_processes_rec(cfg, selected_processes, need);
+                }
+            }
+        }
+    }
+}
+
+
+/**
+ * @brief Select processes based on the optimization keys in the configuration.
+ *
+ * This function iterates through the optimization keys and selects processes that are needed
+ * to produce the items specified in those keys, excluding the "time" key.
+ *
+ * @param cfg The configuration containing the processes and optimization keys.
+ */
+void processes_selection(Config &cfg) {
+    std::unordered_set<std::string> selected_processes;
+    for (const auto &goal : cfg.optimizeKeys) {
+        if (goal != "time") {
+            Item target{goal, 0};
+            select_processes_rec(cfg, selected_processes, target);
+        }
+    }
+
+    // Remove processes not in the selection
+    std::vector<Process> filtered_processes;
+    for (const Process &proc : cfg.processes) {
+        if (selected_processes.find(proc.name) != selected_processes.end()) {
+            filtered_processes.push_back(proc);
+        }
+    }
+    if (!filtered_processes.empty()) {
+        cfg.processes = std::move(filtered_processes);
+    }
+}
+
+
 Config parse_config(std::istream &in) {
     Config cfg;
     std::string line;
@@ -219,6 +290,16 @@ Config parse_config(std::istream &in) {
     if (cfg.optimizeKeys.empty())
         throw std::runtime_error("Missing optimize section");
 
+    // check if several processes have the same name
+    std::unordered_set<std::string> process_names;
+    for (const Process &proc : cfg.processes) {
+        if (process_names.find(proc.name) != process_names.end()) {
+            throw std::runtime_error("Duplicate process name: '" + proc.name + "'");
+        }
+        process_names.insert(proc.name);
+    }
+
+    // Initialize the distance map for optimization keys
     for (const std::string& goal : cfg.optimizeKeys) {
         if (goal != "time") {
             cfg.dist[goal] = 0.0;
@@ -227,16 +308,12 @@ Config parse_config(std::istream &in) {
         }
     }
 
-    // Remove processes producing nothing
-    std::vector<Process> processes_copy = cfg.processes;
-    for (const Process &proc : processes_copy) {
-        if (proc.results.empty()) {
-            auto it = std::remove_if(cfg.processes.begin(), cfg.processes.end(),
-                                     [&proc](const Process &p) { return p.name == proc.name; });
-            cfg.processes.erase(it, cfg.processes.end());
-        }
+    // Remove processes that are not needed for production of the optimization keys
+    if (cfg.optimizeKeys.size() != 1 || cfg.optimizeKeys[0] != "time") {
+        processes_selection(cfg);
     }
 
+    // Detect obvious cycles in the processes
     detect_obvious_cycles(cfg);
 
     return cfg;

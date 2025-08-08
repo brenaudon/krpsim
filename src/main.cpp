@@ -39,13 +39,7 @@ int main(int argc, char **argv) {
         Config cfg = parse_config(in);
         print_config(cfg);
 
-        for (const auto &proc : cfg.processes) {
-            if (proc.in_cycle) {
-                std::cerr << "Process '" << proc.name << "' is in a cycle, which is not allowed.\n";
-            }
-        }
-
-        Candidate best_candidate = solve_with_ga(cfg, 300000);
+        Candidate best_candidate = solve_with_ga(cfg, 30000);
         std::cout << "Simulation trace:\n";
         for (const auto &entry : best_candidate.trace) {
             std::cout << "Cycle " << entry.cycle << ": Start process " << cfg.processes[entry.procId].name << '\n';
