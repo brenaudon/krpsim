@@ -134,10 +134,13 @@ void detect_obvious_cycles(Config &cfg) {
                 ++temp_it;
             }
             ++temp_it;
-            while (cycle_starts_from[temp_it->name] && temp_it != cfg.processes.end()) {
+            while (temp_it != cfg.processes.end() && cycle_starts_from.count(temp_it->name)) {
                 ++temp_it;
             }
             it = temp_it;
+            if (it == cfg.processes.end()) {
+                break; // No more processes to check
+            }
             cycle_starts_from[temp_it->name] = true;
             cycle_names.clear();
             continue;
@@ -231,6 +234,177 @@ void processes_selection(Config &cfg) {
 }
 
 
+/**
+ * @brief Recursively calculate the maximum stocks needed for each item.
+ *
+ * This function updates the needed and produced stocks for the target item and its dependencies.
+ *
+ * @param cfg The configuration containing processes and their needs/results.
+ * @param explored_processes A set to keep track of already explored processes to avoid cycles.
+ * @param needed_stocks A map to keep track of the total needed stocks for each item.
+ * @param produced_stocks A map to keep track of the total produced stocks for each item.
+ * @param target The target item to calculate stocks for.
+ */
+void max_stocks_rec(Config &cfg, std::unordered_set<std::string>& explored_processes,
+                    std::unordered_map<std::string, int> &needed_stocks,
+                    std::unordered_map<std::string, int> &produced_stocks, const Item &target) {
+    for (const Process &proc : cfg.processes) {
+        if (std::find(proc.results.begin(), proc.results.end(), target) != proc.results.end()) {
+            if (explored_processes.find(proc.name) == explored_processes.end()) {
+                explored_processes.insert(proc.name);
+                for (const Item &need : proc.needs) {
+                    if (needed_stocks.find(need.name) == needed_stocks.end()) {
+                        needed_stocks[need.name] = 0;
+                    }
+                    needed_stocks[need.name] += need.qty;
+                    max_stocks_rec(cfg, explored_processes, needed_stocks, produced_stocks, need);
+                }
+                for (const Item &result : proc.results) {
+                    if (produced_stocks.find(result.name) == produced_stocks.end()) {
+                        produced_stocks[result.name] = 0;
+                    }
+                    produced_stocks[result.name] += result.qty;
+                }
+            }
+        }
+    }
+}
+
+
+/**
+ * @brief Build the maximum stocks for each item based on the optimization keys.
+ *
+ * This function calculates the maximum stocks for each item based on the processes and their dependencies,
+ * and sets the limiting item and its initial stock in the configuration.
+ *
+ * @param cfg The configuration containing processes, initial stocks, and optimization keys.
+ */
+void build_max_stocks(Config &cfg) {
+    std::unordered_map<std::string, int> needed_stocks;
+    std::unordered_map<std::string, int> produced_stocks;
+    std::unordered_set<std::string> explored_processes;
+    for (const auto &goal : cfg.optimizeKeys) {
+        if (goal != "time") {
+            Item target{goal, 0};
+            max_stocks_rec(cfg, explored_processes, needed_stocks, produced_stocks, target);
+        }
+    }
+
+    std::unordered_map<std::string, int> final_stocks;
+    for (const auto& pair: needed_stocks) {
+        int needed_stock = pair.second;
+        int produced_stock = 0;
+        if (produced_stocks.find(pair.first) != produced_stocks.end())
+            produced_stock = produced_stocks[pair.first];
+        final_stocks[pair.first] = produced_stock - needed_stock;
+    }
+    // Add stocks that are only produced
+    for (const auto& pair : produced_stocks) {
+        if (final_stocks.find(pair.first) == final_stocks.end()) {
+            final_stocks[pair.first] = pair.second;
+        }
+    }
+
+    // find min stock in final_stocks
+    int min_stock = std::numeric_limits<int>::max();
+    std::string min_stock_name;
+    for (const auto& pair : final_stocks) {
+        if (pair.second >= 0 && pair.second < min_stock) {
+            if (pair.second == 0 && cfg.initialStocks.find(pair.first) == cfg.initialStocks.end()) {
+                // If the stock is 0 but not in initial stocks, we cannot use it as a limiting item
+                continue;
+            }
+            min_stock_name = pair.first;
+            min_stock = pair.second;
+        }
+    }
+
+    cfg.maxStocks.limiting_item = min_stock_name;
+    std::unordered_map<std::string, int> max_stocks{}; // Maximum stock for each item, keyed by item name.
+    std::unordered_map<std::string, double> max_stocks_factors{}; // Factors to calculate max stock from current limiting item stock at each process choice, keyed by item name. If -1.0, means no limit on the item.
+
+    // If min_stock (limiting item) is 0, means as much is produced as needed, so we can only use the initial stock
+    if (min_stock == 0) {
+        int init_limiting_stock = cfg.initialStocks[min_stock_name];
+        cfg.maxStocks.limiting_initial_stock = init_limiting_stock;
+        for (const auto& pair : final_stocks) {
+            if (pair.first == min_stock_name) {
+                max_stocks[pair.first] = init_limiting_stock;
+            } else {
+                max_stocks[pair.first] = needed_stocks[pair.first] * (init_limiting_stock / needed_stocks[min_stock_name]);
+            }
+        }
+    } else {
+        // If min_stock is greater than 0, we keep a factor to calculate max_stock from the limiting current stock at each process choice
+        cfg.maxStocks.limiting_initial_stock = -1; // -1 means we have to use factor to calculate max stock from current limiting item stock at each process choice
+        for (const auto& pair : final_stocks) {
+            max_stocks_factors[pair.first] = static_cast<double>(pair.second) / min_stock;
+            if (pair.first == min_stock_name) {
+                max_stocks_factors[pair.first] = -1.0; // No limit on the limiting item
+            }
+        }
+    }
+
+    // No limit on optimized items
+    for (const auto& goal : cfg.optimizeKeys) {
+        if (goal != "time") {
+            max_stocks[goal] = std::numeric_limits<int>::max();
+            max_stocks_factors[goal] = -1.0; // No factor needed for optimized items
+        }
+    }
+
+
+    const int N = static_cast<int>(cfg.item_to_id.size());
+    cfg.maxStocks.abs_cap_by_id.assign(N, -1);
+    cfg.maxStocks.factor_by_id.assign(N, -1.0);
+    for (auto& [name, cap] : max_stocks)
+        cfg.maxStocks.abs_cap_by_id[cfg.item_to_id[name]] = cap;
+    for (auto& [name, fac] : max_stocks_factors)
+        cfg.maxStocks.factor_by_id[cfg.item_to_id[name]] = fac;
+
+}
+
+static int get_or_make_id(const std::string& s,
+                          std::unordered_map<std::string,int>& map,
+                          std::vector<std::string>& vec) {
+    auto it = map.find(s);
+    if (it != map.end()) return it->second;
+    int id = static_cast<int>(vec.size());
+    map.emplace(s, id);
+    vec.push_back(s);
+    return id;
+}
+
+void build_item_index_and_ids(Config& cfg) {
+    cfg.item_to_id.clear();
+    cfg.id_to_item.clear();
+
+    // Collect all item names from stocks and processes
+    for (auto& [name, _] : cfg.initialStocks)
+        get_or_make_id(name, cfg.item_to_id, cfg.id_to_item);
+    for (auto& p : cfg.processes) {
+        for (auto& it : p.needs)
+            get_or_make_id(it.name, cfg.item_to_id, cfg.id_to_item);
+        for (auto& it : p.results)
+            get_or_make_id(it.name, cfg.item_to_id, cfg.id_to_item);
+    }
+
+    // Fill ID-based vectors on processes
+    for (auto& p : cfg.processes) {
+        p.needs_by_id.clear();
+        p.needs_by_id.reserve(p.needs.size());
+        p.results_by_id.clear();
+        p.results_by_id.reserve(p.results.size());
+        for (auto& it : p.needs)
+            p.needs_by_id.emplace_back(cfg.item_to_id[it.name], it.qty);
+        for (auto& it : p.results)
+            p.results_by_id.emplace_back(cfg.item_to_id[it.name], it.qty);
+    }
+
+}
+
+
+
 Config parse_config(std::istream &in) {
     Config cfg;
     std::string line;
@@ -308,9 +482,29 @@ Config parse_config(std::istream &in) {
         }
     }
 
+    // // TODO: check if need to be removed
+    // for (const std::string& goal : cfg.optimizeKeys) {
+    //     if (goal != "time") {
+    //         for (Process& proc : cfg.processes) {
+    //             for (const Item& item : proc.needs) {
+    //                 if (item.name == goal) {
+    //                     proc.use_optimized_items = true;
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
     // Remove processes that are not needed for production of the optimization keys
     if (cfg.optimizeKeys.size() != 1 || cfg.optimizeKeys[0] != "time") {
         processes_selection(cfg);
+    }
+
+    build_item_index_and_ids(cfg);
+
+    // Build the max_stock map representing the maximum stock for each item
+    if (cfg.optimizeKeys.size() != 1 || cfg.optimizeKeys[0] != "time") {
+        build_max_stocks(cfg);
     }
 
     // Detect obvious cycles in the processes

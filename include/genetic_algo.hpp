@@ -37,6 +37,8 @@ struct RunningProcess {
     int id;     ///< process ID
 
     bool operator>(const RunningProcess& o) const noexcept { return finish > o.finish; } ///< comparison operator for priority queue
+    RunningProcess() = default;
+    RunningProcess(int f, int i) : finish(f), id(i) {}
 };
 
 
@@ -46,10 +48,10 @@ using RunPQ = std::priority_queue<RunningProcess, std::vector<RunningProcess>, s
 
 ///< @brief Candidate in the genetic algorithm
 struct Candidate {
-    int                                     cycle{};    ///< current cycle in the simulation, initially 0
-    std::unordered_map<std::string, int>    stocks;     ///< current stock of items, keyed by item name
-    RunPQ                                   running;    ///< running processes in the simulation, ordered by finish time
-    std::vector<TraceEntry>                 trace;      ///< trace of launch events leading to this node
+    int                     cycle{};        ///< current cycle in the simulation, initially 0
+    std::vector<int>        stocks_by_id;   ///< current stock of items, indexed by item ID
+    RunPQ                   running;        ///< running processes in the simulation, ordered by finish time
+    std::vector<TraceEntry> trace;          ///< trace of launch events leading to this node
 };
 
 

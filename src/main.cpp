@@ -12,6 +12,35 @@
 #include "krpsim.hpp"
 #include "genetic_algo.hpp"
 
+void print_max_stocks(const Config &cfg) {
+    std::cout << "Max stocks:\n";
+    if (cfg.maxStocks.limiting_item.empty()) {
+        std::cout << "  No limiting item\n";
+    } else {
+        std::cout << "  Limiting item: " << cfg.maxStocks.limiting_item
+                  << " (initial stock: " << cfg.maxStocks.limiting_initial_stock << ")\n";
+    }
+    for (size_t i = 0; i < cfg.maxStocks.abs_cap_by_id.size(); ++i) {
+        const auto &item_name = cfg.id_to_item[i];
+        int cap = cfg.maxStocks.abs_cap_by_id[i];
+        double factor = cfg.maxStocks.factor_by_id[i];
+        if (cap < 0 && factor < 0.0) {
+            continue; // No cap or factor for this item
+        }
+        std::cout<< item_name << '\n';
+        if (cap < 0) {
+            std::cout << "    No Cap\n";
+        } else {
+            std::cout << "    Cap: " << cap << '\n';
+        }
+        if (factor >= 0.0) {
+            std::cout << "    Factor: " << factor << '\n';
+        } else {
+            std::cout << "    No factor limit\n";
+        }
+    }
+}
+
 /**
  * @brief Main function for the krpsim executable.
  *
@@ -39,6 +68,8 @@ int main(int argc, char **argv) {
         Config cfg = parse_config(in);
         print_config(cfg);
 
+        print_max_stocks(cfg);
+
         Candidate best_candidate = solve_with_ga(cfg, 30000);
         std::cout << "Simulation trace:\n";
         for (const auto &entry : best_candidate.trace) {
@@ -50,8 +81,10 @@ int main(int argc, char **argv) {
 
         std::cout << '\n';
         std::cout << "Final stocks:\n";
-        for (const auto &stock : best_candidate.stocks) {
-            std::cout << stock.first << ": " << stock.second << '\n';
+        for (size_t i = 0; i < best_candidate.stocks_by_id.size(); ++i) {
+            std::string item_name = cfg.id_to_item[i];
+            int qty = best_candidate.stocks_by_id[i];
+            std::cout << item_name << ": " << qty << '\n';
         }
     } catch (const std::exception &e) {
         std::cerr << "Error: " << e.what() << '\n';

@@ -14,9 +14,9 @@
 #include <algorithm>
 #include <iostream>
 
-std::string ltrim(std::string s); ///< @brief Left trim a string
-std::string rtrim(std::string s); ///< @brief Right trim a string
-std::string trim(std::string s); ///< @brief Trim a string (both sides)
+std::string ltrim(std::string s);   ///< @brief Left trim a string
+std::string rtrim(std::string s);   ///< @brief Right trim a string
+std::string trim(std::string s);    ///< @brief Trim a string (both sides)
 
 /**
  * @brief Print the configuration to stdout.

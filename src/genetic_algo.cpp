@@ -24,9 +24,9 @@
  */
 struct GeneticParameters {
     int maxIter = 1000;         ///< Maximum number of iterations for the genetic algorithm
-    int populationSize = 10;   ///< Size of the population in the genetic algorithm
+    int populationSize = 100;   ///< Size of the population in the genetic algorithm
     int maxCycles = 50000;      ///< Maximum number of cycles to run the simulation
-    double mutationRate = 0.1;  ///< Percentage (0-100) of mutation in the genetic algorithm
+    double mutationRate = 10.0;  ///< Percentage (0-100) of mutation in the genetic algorithm
     double score_alpha = 1.0;   ///< Weight for the target stock in the fitness function
     double score_beta = 0.1;    ///< Weight for the other stocks in the fitness function
     double score_decay = 0.7;   ///< Decay factor for the other
@@ -36,26 +36,27 @@ struct GeneticParameters {
 /**
  * @brief Function to apply stock changes based on items.
  *
- * @param stock The stock map to modify, keyed by item name.
- * @param items The vector of items to apply, each with a name and quantity.
+ * @param stocks_by_id The current stock of items, indexed by item ID.
+ * @param items_by_id A vector of pairs, where each pair contains an item ID and its quantity.
  * @param sign The sign to apply to the quantities (positive for adding, negative for removing).
  */
-static void apply_items(std::unordered_map<std::string, int>& stock, const std::vector<Item>& items, int sign){
-    for(const auto &i: items)
-        stock[i.name] += sign * i.qty;
+static void apply_items(std::vector<int>& stocks_by_id, const std::vector<std::pair<int,int>>& items_by_id, const int sign){
+    for(const auto &[id, qty] : items_by_id)
+        stocks_by_id[id] += sign * qty;
 }
 
 
 /**
  * @brief Function to realise finished processes in a node based on the current cycle value.
  *
- * @param n The candidate containing the running processes and current cycle.
+ * @param c The candidate containing the running processes and current cycle.
  * @param procs The vector of processes, used to apply results when a process finishes.
  */
 static void realise_finishes(Candidate &c, const std::vector<Process>& procs) {
     while (!c.running.empty() && c.running.top().finish <= c.cycle) {
-        const int id = c.running.top().id; c.running.pop();
-        apply_items(c.stocks, procs[id].results, +1);
+        const int id = c.running.top().id;
+        c.running.pop();
+        apply_items(c.stocks_by_id, procs[id].results_by_id, +1);
     }
 }
 
@@ -63,22 +64,65 @@ static void realise_finishes(Candidate &c, const std::vector<Process>& procs) {
 /**
  * @brief Function to check if all needs of a process are satisfied by the current stock.
  *
- * @param stocks The current stock of items, keyed by item name.
+ * @param stocks_by_id The current stock of items, indexed by item ID.
  * @param proc The process to check, containing its needs.
  */
-static bool needs_satisfied(const std::unordered_map<std::string, int>& stocks, const Process& proc) {
-    for(auto &it: proc.needs) {
-        auto f = stocks.find(it.name);
-        if(f == stocks.end() || f->second < it.qty)
-            return false;
-    }
-    for(auto &it: proc.results) {
-        auto f = stocks.find(it.name);
-        if(f != stocks.end() && f->second > 10000 && it.name != "euro")
+static bool needs_satisfied(const std::vector<int>& stocks_by_id, const Process& proc) {
+    for(auto [id, qty] : proc.needs_by_id) {
+        if(stocks_by_id[id] < qty)
             return false;
     }
     return true;
 }
+
+
+void delete_high_stock_processes(std::vector<int>& runnable_list,
+                                 const Config& cfg,
+                                 const std::vector<int>& stocks_by_id)
+{
+    const int N = static_cast<int>(cfg.item_to_id.size());
+    const bool factors_mode = (cfg.maxStocks.limiting_initial_stock == -1);
+    static thread_local std::vector<uint8_t> over;   // reused scratch
+    over.assign(N, 0);
+
+    // limiting stock for factor caps
+    const int limiting_stock =
+        (cfg.maxStocks.limiting_initial_stock != -1)
+            ? cfg.maxStocks.limiting_initial_stock
+            : (!cfg.maxStocks.limiting_item.empty()
+               ? stocks_by_id[cfg.item_to_id.at(cfg.maxStocks.limiting_item)]
+               : 0);
+
+    // mark overfull items
+    for (int i = 0; i < N; ++i) {
+        const int   cur   = stocks_by_id[i];
+        const int   cap   = cfg.maxStocks.abs_cap_by_id[i];     // -1 => no cap
+        const double fac  = cfg.maxStocks.factor_by_id[i];      // -1 => no cap
+
+        bool too_much = false;
+        if (!factors_mode && cap >= 0 && cur > cap)
+            too_much = true;
+        if (factors_mode && fac >= 0.0 && cur > limiting_stock * fac)
+            too_much = true;
+        over[i] = too_much ? 1 : 0;
+    }
+
+    // erase_if: drop processes whose *all* results are overfull
+    auto drop = [&](int pid) {
+        if (pid < 0)
+            return false; // keep wait sentinel
+        const Process& p = cfg.processes[pid];
+        if (p.results_by_id.empty())
+            return false;
+        for (auto [id, _] : p.results_by_id)
+            if (!over[id])
+                return false;
+        return true;
+    };
+
+    runnable_list.erase(std::remove_if(runnable_list.begin(), runnable_list.end(), drop),runnable_list.end());
+}
+
 
 
 /**
@@ -88,7 +132,7 @@ static bool needs_satisfied(const std::unordered_map<std::string, int>& stocks, 
  * @param cfg The configuration containing the processes.
  * @param proc_id The ID of the process to apply, or -1 to wait for the next running process.
  */
-void apply_process(Candidate &candidate, const Config cfg, int proc_id) {
+void apply_process(Candidate &candidate, const Config& cfg, int proc_id) {
     if (proc_id == -1) {
         // If -1 is selected, just wait for the next running process to finish
         if (!candidate.running.empty()) {
@@ -100,8 +144,8 @@ void apply_process(Candidate &candidate, const Config cfg, int proc_id) {
     const Process &proc = cfg.processes[proc_id];
 
     // Launch the process
-    candidate.running.push({candidate.cycle + proc.delay, proc_id});
-    apply_items(candidate.stocks, proc.needs, -1);
+    candidate.running.emplace(candidate.cycle + proc.delay, proc_id);
+    apply_items(candidate.stocks_by_id, proc.needs_by_id, -1);
     candidate.trace.push_back({candidate.cycle, proc_id});
 
 }
@@ -119,27 +163,29 @@ void apply_process(Candidate &candidate, const Config cfg, int proc_id) {
 Candidate generate_child(const Config &cfg, const GeneticParameters &params, std::optional<Candidate> parent1 = std::nullopt, std::optional<Candidate> parent2 = std::nullopt) {
     Candidate child;
     child.cycle = 0;
-    child.stocks = cfg.initialStocks;
+    child.stocks_by_id.assign(cfg.item_to_id.size(), 0);
+    for (auto& [name, qty] : cfg.initialStocks)
+        child.stocks_by_id[cfg.item_to_id.at(name)] = qty;
     child.trace.clear();
     child.running = RunPQ();
 
     int i = 0;
-    std::string target = "";
-    for (const auto& key : cfg.optimizeKeys) {
-        if (key != "time") {
-            target = key;
-            break; // We only need one target for the child
-        }
-    }
+    // std::string target;
+    // for (const auto& key : cfg.optimizeKeys) {
+    //     if (key != "time") {
+    //         target = key;
+    //         break; // We only need one target for the child
+    //     }
+    // }
 
-    int longest_proc_delay = 0;
-    for (const auto& proc : cfg.processes) {
-        auto it = std::find_if(proc.results.begin(), proc.results.end(),
-                                 [&target](const Item &item) { return item.name == target; });
-        if (it != proc.results.end() && proc.delay > longest_proc_delay) {
-            longest_proc_delay = proc.delay;
-        }
-    }
+    // int longest_proc_delay = 0;
+    // for (const auto& proc : cfg.processes) {
+    //     auto it = std::find_if(proc.results.begin(), proc.results.end(),
+    //                              [&target](const Item &item) { return item.name == target; });
+    //     if (it != proc.results.end() && proc.delay > longest_proc_delay) {
+    //         longest_proc_delay = proc.delay;
+    //     }
+    // }
 
     int parent1_size = 0;
     int parent2_size = 0;
@@ -150,12 +196,16 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, std
         parent2_size = static_cast<int>(parent2.value().trace.size());
     }
 
+    int processes_size = static_cast<int>(cfg.processes.size());
+    std::vector<int> runnable_list;
+    runnable_list.reserve(processes_size + 1); // +1 for the special -1 ID for waiting next running processes
+
     while (child.cycle < params.maxCycles) {
         // Check if there are any runnable processes
-        std::vector<int> runnable_list;
-        int processes_size = static_cast<int>(cfg.processes.size());
+        runnable_list.clear();
+
         for (int id = 0; id < processes_size; ++id) {
-            if (needs_satisfied(child.stocks, cfg.processes[id])) {
+            if (needs_satisfied(child.stocks_by_id, cfg.processes[id])) {
                 runnable_list.push_back(id);
             }
         }
@@ -168,32 +218,32 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, std
             break; // No more runnable processes, exit the loop
         }
 
-        std::vector<int> runnable_list_copy = runnable_list;
-        for (int proc_id : runnable_list_copy) {
-            if (proc_id != -1 && cfg.processes[proc_id].in_cycle == true) {
-                runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), proc_id), runnable_list.end());
+        for (auto it = runnable_list.begin(); it != runnable_list.end(); ) {
+            if (*it != -1 && cfg.processes[*it].in_cycle == true) {
+                runnable_list.erase(it); // Remove processes that are in a cycle
+            } else {
+                ++it; // Only increment if we didn't erase an element
             }
-        }
-        if (runnable_list.size() == 1 && runnable_list[0] == -1) {
-            runnable_list = runnable_list_copy;
         }
 
-        if (child.cycle >= params.maxCycles - longest_proc_delay) {
-            std::vector<int> runnable_list_copy = runnable_list;
-            for (int proc_id : runnable_list_copy) {
-                if (proc_id != -1) {
-                    auto it = std::find_if(cfg.processes[proc_id].results.begin(), cfg.processes[proc_id].results.end(),
-                                 [&target](const Item &item) { return item.name == target; });
-                    if (it == cfg.processes[proc_id].results.end()) {
-                        runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), proc_id), runnable_list.end());
-                    }
-                }
-            }
-            runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), -1), runnable_list.end());
-            if (runnable_list.empty()) {
-                runnable_list = runnable_list_copy;
-            }
-        }
+        delete_high_stock_processes(runnable_list, cfg, child.stocks_by_id);
+
+        // if (child.cycle >= params.maxCycles - longest_proc_delay) {
+        //     std::vector<int> runnable_list_copy = runnable_list;
+        //     for (int proc_id : runnable_list_copy) {
+        //         if (proc_id != -1) {
+        //             auto it = std::find_if(cfg.processes[proc_id].results.begin(), cfg.processes[proc_id].results.end(),
+        //                          [&target](const Item &item) { return item.name == target; });
+        //             if (it == cfg.processes[proc_id].results.end()) {
+        //                 runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), proc_id), runnable_list.end());
+        //             }
+        //         }
+        //     }
+        //     runnable_list.erase(std::remove(runnable_list.begin(), runnable_list.end(), -1), runnable_list.end());
+        //     if (runnable_list.empty()) {
+        //         runnable_list = runnable_list_copy;
+        //     }
+        // }
 
         int random_choice = rand() % 100; // Randomly choose between parent1, parent2 and mutation
 
@@ -243,6 +293,9 @@ int score_candidate(const Candidate &candidate, const Config &cfg, const Genetic
     std::string target;
 
     if (cfg.optimizeKeys.size() == 1 && cfg.optimizeKeys[0] == "time") {
+        if (candidate.cycle == 0) {
+            return 100000; // No running processes, return max score
+        }
         return 100000 / candidate.cycle;
     }
 
@@ -254,15 +307,17 @@ int score_candidate(const Candidate &candidate, const Config &cfg, const Genetic
     }
 
     const int INF = 1000000; // Arbitrary large value for unreachable stocks
-    auto itT = candidate.stocks.find(target);
-    const double targetQty = (itT == candidate.stocks.end()) ? 0.0 : itT->second;
+    const double targetQty = candidate.stocks_by_id[cfg.item_to_id.at(target)];
 
     double interm = 0.0;
-    for (const auto& [s, qty] : candidate.stocks) {
+    for (size_t i = 0; i < candidate.stocks_by_id.size(); ++i) {
+        std::string s = cfg.id_to_item[i];
+        int qty = candidate.stocks_by_id[i];
         if (s == target || qty <= 0) continue;
         auto it = cfg.dist.find(s);
+
         if (it == cfg.dist.end() || it->second >= INF) continue; // unreachable → no credit
-        double w = std::pow(params.score_decay, static_cast<double>(it->second));
+        double w = std::pow(params.score_decay, it->second);
         interm += w * qty;
     }
     return params.score_alpha * targetQty + params.score_beta * interm;
@@ -272,7 +327,9 @@ int score_candidate(const Candidate &candidate, const Config &cfg, const Genetic
 Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
     GeneticParameters params;
     Candidate best_candidate;
-    best_candidate.stocks = cfg.initialStocks;
+    best_candidate.stocks_by_id.assign(cfg.item_to_id.size(), 0);
+    for (auto& [name, qty] : cfg.initialStocks)
+        best_candidate.stocks_by_id[cfg.item_to_id.at(name)] = qty;
 
     // get start time
     auto start_time = std::chrono::steady_clock::now();
@@ -286,7 +343,7 @@ Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
         if (elapsed_time > timeBudgetMs) {
             break;
         }
-        //std::cout << "Generating candidate " << i + 1 << " of " << params.populationSize << std::endl;
+        std::cout << "Generating candidate " << i + 1 << " of " << params.populationSize << std::endl;
         candidates.push_back(generate_candidate(cfg, params));
     }
 
