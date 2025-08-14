@@ -33,8 +33,6 @@ struct Process {
     int                 delay;      ///< Delay in cycles for the process to complete.
     bool                in_cycle{}; ///< Whether the process is in an obvious cycle.
 
-    //bool                use_optimized_items{}; ///< Whether the process uses optimized items (e.g., euro).
-
     std::vector<std::pair<int,int>> needs_by_id;    ///< Needs of the process, each pair contains item ID and quantity.
     std::vector<std::pair<int,int>> results_by_id;  ///< Results of the process, each pair contains item ID and quantity.
 };
@@ -56,6 +54,8 @@ struct Config {
 
     std::unordered_map<std::string,int>     item_to_id;     ///< Mapping from item name to its ID, used for quick access.
     std::vector<std::string>                id_to_item;     ///< Mapping from item ID to its name, used for quick access.
+
+    std::vector<std::vector<std::pair<int,int>>>    needers_by_item;   ///< List of processes that need each item, each pair contains process ID and quantity needed ([item_id] -> {(pid, qty), ...})
 };
 
 #endif
