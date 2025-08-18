@@ -47,7 +47,7 @@ void delete_high_stock_processes(std::vector<int>& runnable_list,
     const int item_count = static_cast<int>(cfg.item_to_id.size());
     const bool factors_mode = (cfg.maxStocks.limiting_initial_stock == -1);
     std::vector<bool> over;
-    over.assign(item_count, 0);
+    over.assign(item_count, false);
 
     // limiting stock for factor caps
     const int limiting_stock =
@@ -71,7 +71,7 @@ void delete_high_stock_processes(std::vector<int>& runnable_list,
         over[i] = too_much;
     }
 
-    // erase_if: drop processes whose *all* results are overfull
+    // drop processes whose all results are overfull
     auto drop = [&](int pid) {
         if (pid < 0)
             return false; // keep wait sentinel
@@ -203,7 +203,7 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, std
     child.trace.clear();
     child.running = RunPQ();
 
-    const int process_count = cfg.processes.size();
+    const int process_count = static_cast<int>(cfg.processes.size());
     std::vector<int> missing;
     std::vector<int> runnable;
     std::vector<bool>  is_runnable; // keep track of processes in runnable list
@@ -277,7 +277,8 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, std
             apply_process(child, cfg, proc_id, missing, runnable, is_runnable);
         }
 
-        for (size_t j = 0; j < missing.size(); ++j) {
+        const int missing_size = static_cast<int>(missing.size());
+        for (int j = 0; j < missing_size; ++j) {
             if (!is_runnable[j] && missing[j] == 0) {
                 is_runnable[j] = true; // Mark as runnable if no more missing items
                 runnable.push_back(j);
@@ -328,18 +329,18 @@ int score_candidate(const Candidate &candidate, const Config &cfg, const Genetic
         }
     }
 
-    const int INF = 1000000; // Arbitrary large value for unreachable stocks
+    const int inf = 1000000; // Arbitrary large value for unreachable stocks
     const double targetQty = candidate.stocks_by_id[cfg.item_to_id.at(target)];
 
     double interm = 0.0;
     for (size_t i = 0; i < candidate.stocks_by_id.size(); ++i) {
         std::string s = cfg.id_to_item[i];
-        int qty = candidate.stocks_by_id[i];
+        const int qty = candidate.stocks_by_id[i];
         if (s == target || qty <= 0) continue;
         auto it = cfg.dist.find(s);
 
-        if (it == cfg.dist.end() || it->second >= INF) continue; // unreachable → no credit
-        double w = std::pow(params.score_decay, it->second);
+        if (it == cfg.dist.end() || it->second >= inf) continue; // unreachable → no credit
+        const double w = std::pow(params.score_decay, it->second);
         interm += w * qty;
     }
     return params.score_alpha * targetQty + params.score_beta * interm;
@@ -380,8 +381,8 @@ Candidate solve_with_ga(const Config &cfg, long timeBudgetMs){
 
         // Sort candidates by score
         std::sort(candidates.begin(), candidates.end(), [&](const Candidate &a, const Candidate &b) {
-            int score_a = score_candidate(a, cfg, params);
-            int score_b = score_candidate(b, cfg, params);
+            const int score_a = score_candidate(a, cfg, params);
+            const int score_b = score_candidate(b, cfg, params);
             if (score_a == score_b) {
                 return a.cycle < b.cycle;
             }

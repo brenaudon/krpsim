@@ -77,7 +77,7 @@ int main(int argc, char **argv) {
             }
         }
 
-        Candidate best_candidate = solve_with_ga(cfg, 300000);
+        Candidate best_candidate = solve_with_ga(cfg, 30000);
         std::cout << "Simulation trace:\n";
         for (const auto &entry : best_candidate.trace) {
             std::cout << "Cycle " << entry.cycle << ": Start process " << cfg.processes[entry.procId].name << '\n';

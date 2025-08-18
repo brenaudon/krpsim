@@ -183,29 +183,17 @@ void build_dist_map(const std::string goal, double depth, Config& cfg) {
 static std::string signature_of(const std::vector<Item>& items) {
     if (items.empty()) return {}; // empty signature
 
-    // Aggregate quantities by name (in case the same name appears multiple times)
-    std::unordered_map<std::string, long long> agg;
-    agg.reserve(items.size() * 2);
-    for (const Item& it : items) {
-        // If qty in Item can be non-positive, clamp as needed; assuming >= 0 here.
-        agg[it.name] += static_cast<long long>(it.qty);
-    }
-
-    // Sort by name for a canonical representation
-    std::vector<std::pair<std::string, long long>> pairs;
-    pairs.reserve(agg.size());
-    for (auto& kv : agg) pairs.emplace_back(kv.first, kv.second);
+    // Sort by name so we can build a deterministic signature.
+    std::vector<std::pair<std::string, int>> pairs;
+    pairs.reserve(items.size());
+    for (auto& item : items) pairs.emplace_back(item.name, item.qty);
     std::sort(pairs.begin(), pairs.end(),
               [](const auto& a, const auto& b){ return a.first < b.first; });
 
-    // Build a collision-resistant key with length-prefixing
-    // format: |len(name)#name=qty;|...
+    // Build a key with length-prefixing. format: name=qty;...
     std::string key;
     key.reserve(pairs.size() * 16);
     for (const auto& [name, qty] : pairs) {
-        key.push_back('|');
-        key += std::to_string(name.size());
-        key.push_back('#');
         key += name;
         key.push_back('=');
         key += std::to_string(qty);
@@ -214,62 +202,66 @@ static std::string signature_of(const std::vector<Item>& items) {
     return key;
 }
 
-// ---- main routine ----------------------------------------------------------
 
 void detect_obvious_cycles(Config& cfg) {
-    const int n = static_cast<int>(cfg.processes.size());
-    if (n == 0) return;
+    const int proc_count = static_cast<int>(cfg.processes.size());
+    if (proc_count == 0)
+        return;
 
-    // Reset any previous markings
-    for (auto& p : cfg.processes) p.in_cycle = false;
+    // Reset
+    for (auto& p : cfg.processes)
+        p.in_cycle = false;
 
     // Precompute strict signatures
-    std::vector<std::string> need_sig(n), result_sig(n);
-    need_sig.reserve(n); result_sig.reserve(n);
+    std::vector<std::string> need_sig(proc_count);
+    std::vector<std::string> result_sig(proc_count);
+    need_sig.reserve(proc_count);
+    result_sig.reserve(proc_count);
 
-    for (int i = 0; i < n; ++i) {
+    for (int i = 0; i < proc_count; ++i) {
         need_sig[i]   = signature_of(cfg.processes[i].needs);
         result_sig[i] = signature_of(cfg.processes[i].results);
     }
 
-    // Map: strict needs signature -> processes that require exactly that multiset
+    // Map: signature with processes that require exactly that multiset
     std::unordered_map<std::string, std::vector<int>> by_need_sig;
-    by_need_sig.reserve(n * 2);
-    for (int i = 0; i < n; ++i) {
+    by_need_sig.reserve(proc_count * 2);
+    for (int i = 0; i < proc_count; ++i) {
         by_need_sig[need_sig[i]].push_back(i);
     }
 
-    // Build adjacency: i -> j iff results(i) == needs(j) (strict equality)
-    std::vector<std::vector<int>> adj(n);
-    std::vector<char> self_edge(n, 0);
-    for (int i = 0; i < n; ++i) {
-        // Skip processes that produce nothing (cannot start/continue an “obvious” cycle)
+    // Build adjacency: i adjacent with j if results(i) == needs(j)
+    std::vector<std::vector<int>> adj(proc_count);
+    std::vector<bool> self_edge(proc_count, false);
+    for (int i = 0; i < proc_count; ++i) {
         if (cfg.processes[i].results.empty()) continue;
 
-        auto it = by_need_sig.find(result_sig[i]);
+        auto it = by_need_sig.find(result_sig[i]); // get vector of processes that need exactly the same multiset of items
         if (it == by_need_sig.end()) continue;
 
         auto& dests = adj[i];
-        dests = it->second; // copy all matches
-        // Dedup (in case multiple identical indices got inserted — unusual but cheap)
+        dests = it->second;
+        // in case multiple identical indices got inserted
         std::sort(dests.begin(), dests.end());
         dests.erase(std::unique(dests.begin(), dests.end()), dests.end());
 
         if (!dests.empty() && std::binary_search(dests.begin(), dests.end(), i)) {
-            self_edge[i] = 1; // self-loop: results == own needs
+            self_edge[i] = true; // self-loop
         }
     }
 
-    // Tarjan’s SCC to find cycles
-    std::vector<int> index(n, -1), low(n, 0), stack;
-    std::vector<char> on_stack(n, 0);
-    stack.reserve(n);
+    // Tarjan’s SCC (Strongly Connected Components) to find cycles
+    std::vector<int> index(proc_count, -1);
+    std::vector<int> low(proc_count, 0);
+    std::vector<int> stack;
+    std::vector<bool> on_stack(proc_count, false);
+    stack.reserve(proc_count);
     int idx = 0;
 
-    std::function<void(int)> dfs = [&](int v) {
+    std::function<void(int)> dfs = [&](const int v) {
         index[v] = low[v] = idx++;
         stack.push_back(v);
-        on_stack[v] = 1;
+        on_stack[v] = true;
 
         for (int w : adj[v]) {
             if (index[w] == -1) {
@@ -287,7 +279,7 @@ void detect_obvious_cycles(Config& cfg) {
             do {
                 w = stack.back();
                 stack.pop_back();
-                on_stack[w] = 0;
+                on_stack[w] = false;
                 comp.push_back(w);
             } while (w != v);
 
@@ -301,7 +293,7 @@ void detect_obvious_cycles(Config& cfg) {
         }
     };
 
-    for (int v = 0; v < n; ++v) {
+    for (int v = 0; v < proc_count; ++v) {
         if (index[v] == -1) dfs(v);
     }
 }
@@ -422,6 +414,7 @@ void build_max_stocks(Config &cfg) {
         }
     }
 
+    // Final stock is the difference between produced and needed stocks
     std::unordered_map<std::string, int> final_stocks;
     for (const auto& pair: needed_stocks) {
         int needed_stock = pair.second;
@@ -489,6 +482,7 @@ void build_max_stocks(Config &cfg) {
     }
 
 
+    // Fill the maxStocks structure in the configuration
     const int item_count = static_cast<int>(cfg.item_to_id.size());
     cfg.maxStocks.abs_cap_by_id.assign(item_count, -1);
     cfg.maxStocks.factor_by_id.assign(item_count, -1.0);
