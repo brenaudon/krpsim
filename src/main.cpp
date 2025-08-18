@@ -70,13 +70,6 @@ int main(int argc, char **argv) {
 
         print_max_stocks(cfg);
 
-        // TODO: find a way to only disable the processes the farther from initial stock items in each cycle
-        for (auto &proc : cfg.processes) {
-            if (proc.in_cycle && proc.name == "separation_oeuf") {
-                proc.in_cycle = false;
-            }
-        }
-
         Candidate best_candidate = solve_with_ga(cfg, 30000);
         std::cout << "Simulation trace:\n";
         for (const auto &entry : best_candidate.trace) {

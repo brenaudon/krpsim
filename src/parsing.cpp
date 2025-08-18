@@ -70,7 +70,7 @@ namespace detail {
  * @param depth The current depth in the recursion, used to calculate distances.
  * @param cfg The configuration containing processes and their needs/results.
  */
-void build_dist_map(const std::string goal, double depth, Config& cfg) {
+void build_dist_map(const std::string& goal, const double depth, Config& cfg) {
     for (const Process& proc : cfg.processes) {
         for (const Item& item : proc.results) {
             if (item.name == goal) {
@@ -91,95 +91,15 @@ void build_dist_map(const std::string goal, double depth, Config& cfg) {
 
 
 /**
- * @brief Detect obvious cycles in the processes by checking if a process can lead back to itself.
+ * @brief Give a signature for a multiset of items.
  *
- * This function iterates through the processes and checks if any process can lead back to itself
- * through its results and needs, marking them as being in a cycle.
- * We consider a cycle obvious if each process produce exactly the items needed by the next process until the first one is reached again.
+ * This function generates a deterministic signature for a vector of items by sorting them by name
+ * and concatenating their names and quantities into a string.
  *
+ * @param items The vector of items to generate a signature for.
  *
- * @param cfg The configuration containing the processes to check for cycles.
+ * @return A string representing the signature of the items.
  */
-// void detect_obvious_cycles(Config &cfg) {
-//     std::vector<std::string> cycle_names;
-//     std::unordered_map<std::string, bool> cycle_starts_from;
-//
-//     std::vector<Process>::iterator it = cfg.processes.begin();
-//     while (it != cfg.processes.end()) {
-//         std::cout << it->name << std::endl;
-//         Process proc = *it;
-//         if (proc.results.empty()) {
-//             ++it;
-//             continue; // Skip processes that produce nothing
-//         }
-//         bool in_cycle = false;
-//
-//         // Back to cycle start
-//         if (!cycle_names.empty() && cycle_names[0] == proc.name) {
-//             std::cout << "\n";
-//             for (const auto& name : cycle_names) {
-//                 for (Process& p : cfg.processes) {
-//                     if (p.name == name) {
-//                         p.in_cycle = true;
-//                     }
-//                 }
-//             }
-//         }
-//         // If the process is already in a cycle, cycle is done so clear and skip
-//         if (std::find(cycle_names.begin(), cycle_names.end(), proc.name) != cycle_names.end()) {
-//             std::vector<Process>::iterator temp_it = cfg.processes.begin();
-//             while (temp_it != cfg.processes.end()) {
-//                 if (temp_it->name == cycle_names[0]) {
-//                     break;
-//                 }
-//                 ++temp_it;
-//             }
-//             ++temp_it;
-//             while (temp_it != cfg.processes.end() && cycle_starts_from.count(temp_it->name)) {
-//                 ++temp_it;
-//             }
-//             it = temp_it;
-//             if (it == cfg.processes.end()) {
-//                 break; // No more processes to check
-//             }
-//             cycle_starts_from[temp_it->name] = true;
-//             cycle_names.clear();
-//             continue;
-//         }
-//         ++it;
-//
-//         std::vector<Process>::iterator sec_it = cfg.processes.begin();
-//         Process sec_proc;
-//         bool clear_cycles = true;
-//         while (sec_it != cfg.processes.end()) {
-//             sec_proc = *sec_it;
-//             if (proc.results.size() == sec_proc.needs.size()) {
-//                 for (Item& item : proc.results) {
-//                     if (std::find(sec_proc.needs.begin(), sec_proc.needs.end(), item) == sec_proc.needs.end()) {
-//                         break;
-//                     }
-//                     if (item.name == proc.results[proc.results.size() - 1].name) {
-//                         in_cycle = true;
-//                     }
-//                 }
-//                 if (in_cycle) {
-//                     cycle_names.push_back(proc.name);
-//                     if (!cycle_starts_from[proc.name]) {
-//                         cycle_starts_from[proc.name] = true;
-//                     }
-//                     it = sec_it;
-//                     clear_cycles = false;
-//                     break;
-//                 }
-//             }
-//             ++sec_it;
-//         }
-//         if (clear_cycles) {
-//             cycle_names.clear();
-//         }
-//     }
-// }
-// Multiset signature of a list of items (name + aggregated qty), order-independent.
 static std::string signature_of(const std::vector<Item>& items) {
     if (items.empty()) return {}; // empty signature
 
@@ -202,7 +122,16 @@ static std::string signature_of(const std::vector<Item>& items) {
     return key;
 }
 
-
+/**
+ * @brief Detect obvious cycles in the processes by checking if a process can lead back to itself.
+ *
+ * This function iterates through the processes and checks if any process can lead back to itself
+ * through its results and needs, marking them as being in a cycle.
+ * We consider a cycle obvious if each process produce exactly the items needed by the next process until the first one is reached again.
+ *
+ *
+ * @param cfg The configuration containing the processes to check for cycles.
+ */
 void detect_obvious_cycles(Config& cfg) {
     const int proc_count = static_cast<int>(cfg.processes.size());
     if (proc_count == 0)
@@ -258,44 +187,69 @@ void detect_obvious_cycles(Config& cfg) {
     stack.reserve(proc_count);
     int idx = 0;
 
-    std::function<void(int)> dfs = [&](const int v) {
-        index[v] = low[v] = idx++;
-        stack.push_back(v);
-        on_stack[v] = true;
+    std::function<void(int)> dfs = [&](const int pid) {
+        idx++;
+        index[pid] = idx;
+        low[pid] = idx;
+        stack.push_back(pid);
+        on_stack[pid] = true;
 
-        for (int w : adj[v]) {
-            if (index[w] == -1) {
-                dfs(w);
-                low[v] = std::min(low[v], low[w]);
-            } else if (on_stack[w]) {
-                low[v] = std::min(low[v], index[w]);
+        for (int next_pid : adj[pid]) {
+            if (index[next_pid] == -1) {
+                dfs(next_pid);
+                low[pid] = std::min(low[pid], low[next_pid]);
+            } else if (on_stack[next_pid]) {
+                low[pid] = std::min(low[pid], index[next_pid]);
             }
         }
 
         // Root of an SCC
-        if (low[v] == index[v]) {
-            std::vector<int> comp;
-            int w;
+        if (low[pid] == index[pid]) {
+            std::vector<int> cycle;
+            int tmp_pid;
             do {
-                w = stack.back();
+                tmp_pid = stack.back();
                 stack.pop_back();
-                on_stack[w] = false;
-                comp.push_back(w);
-            } while (w != v);
+                on_stack[tmp_pid] = false;
+                cycle.push_back(tmp_pid);
+            } while (tmp_pid != pid);
 
-            if (comp.size() > 1) {
-                for (int u : comp) cfg.processes[u].in_cycle = true;
+            if (cycle.size() > 1) {
+                for (int pid_cycle : cycle)
+                    cfg.processes[pid_cycle].in_cycle = true;
             } else {
                 // Single node: only mark if strict self-loop exists
-                int u = comp[0];
-                if (self_edge[u]) cfg.processes[u].in_cycle = true;
+                int pid_cycle = cycle[0];
+                if (self_edge[pid_cycle])
+                    cfg.processes[pid_cycle].in_cycle = true; // auto cycle
             }
         }
     };
 
-    for (int v = 0; v < proc_count; ++v) {
-        if (index[v] == -1) dfs(v);
+    for (int pid = 0; pid < proc_count; ++pid) {
+        if (index[pid] == -1) dfs(pid);
     }
+
+    // Put in_cycle to false if it is the only process producing the item
+    for (Process &proc : cfg.processes) {
+        if (proc.in_cycle) {
+            for (Item &item : proc.results) {
+                bool only_producer = true;
+                for (Process &other_proc : cfg.processes) {
+                    if (other_proc.name != proc.name &&
+                        std::find(other_proc.results.begin(), other_proc.results.end(), item) != other_proc.results.end()) {
+                        only_producer = false;
+                        break;
+                    }
+                }
+                if (only_producer) {
+                    proc.in_cycle = false;
+                    break; // No need to check other items
+                }
+            }
+        }
+    }
+
 }
 
 
@@ -377,7 +331,6 @@ void max_stocks_rec(Config &cfg, std::unordered_set<std::string>& explored_proce
                         needed_stocks[need.name] = 0;
                     }
                     needed_stocks[need.name] += need.qty;
-                    std::cout << "Need: " << need.name << " x" << needed_stocks[need.name] << std::endl;
                     // Recursively calculate stocks for the needed items
                     max_stocks_rec(cfg, explored_processes, needed_stocks, produced_stocks, need);
                 }
@@ -456,7 +409,6 @@ void build_max_stocks(Config &cfg) {
             if (pair.first == min_stock_name) {
                 max_stocks[pair.first] = init_limiting_stock;
             } else {
-                std::cout << pair.first << " " << pair.second << std::endl;
                 double factor = std::max(static_cast<double>(needed_stocks[min_stock_name]), static_cast<double>(init_limiting_stock));
                 max_stocks[pair.first] = static_cast<int>(static_cast<double>(needed_stocks[pair.first]) * factor);
             }
@@ -465,7 +417,6 @@ void build_max_stocks(Config &cfg) {
         // If min_stock is greater than 0, we keep a factor to calculate max_stock from the limiting current stock at each process choice
         cfg.maxStocks.limiting_initial_stock = -1; // -1 means we have to use factor to calculate max stock from current limiting item stock at each process choice
         for (const auto& pair : final_stocks) {
-            std::cout << pair.first << " " << needed_stocks[pair.first] << " min_stock: " << min_stock <<  std::endl;
             max_stocks_factors[pair.first] = static_cast<double>(needed_stocks[pair.first]) / static_cast<double>(min_stock);
             if (pair.first == min_stock_name) {
                 max_stocks_factors[pair.first] = -1.0; // No limit on the limiting item
@@ -636,19 +587,8 @@ Config parse_config(std::istream &in) {
 
     //print processes in a cycle
     for (const Process &proc : cfg.processes) {
-        if (proc.in_cycle) {
-            std::cout << "Process in cycle: " << proc.name << std::endl;
-        }
-    }
-
-    // print needers_by_item
-    for (size_t id = 0; id < cfg.needers_by_item.size(); ++id) {
-        if (!cfg.needers_by_item[id].empty()) {
-            std::cout << "Item ID " << id << " is needed by processes: ";
-            for (const auto& [pid, qty] : cfg.needers_by_item[id]) {
-                std::cout << "(" << pid << ", " << qty << ") ";
-            }
-            std::cout << std::endl;
+        if (proc.in_cycle == true) {
+            std::cout << "Process " << proc.name << " in cycle." << std::endl;
         }
     }
 
