@@ -1,25 +1,33 @@
-NAME			:=	krpsim
+# **************************************************************************** #
+# COMPILE TARGETS #
+# **************************************************************************** #
+
+# Executable names
+KRPSIM 			:= krpsim
+KRPSIM_VERIF	:= krpsim_verif
 
 # **************************************************************************** #
 #                                 INGREDIENTS                                  #
 # **************************************************************************** #
 
-SRC				:=	src/krpsim.cpp		\
-					src/parsing.cpp		\
-					src/helper.cpp		\
-					src/genetic_algo.cpp	\
+COMMON_SRC 			:= src/parsing.cpp src/helper.cpp
+KRPSIM_SRC 			:= src/krpsim.cpp src/genetic_algo.cpp $(COMMON_SRC)
+KRPSIM_VERIF_SRC	:= src/krpsim_verif.cpp $(COMMON_SRC)
 
-SRC_OBJS		:=	$(SRC:%.cpp=.build/%.o)
-DEPS			:=	$(SRC_OBJS:%.o=%.d)
+# Object files (stored in .build/ keeping tree structure)
+KRPSIM_OBJS 		:= $(KRPSIM_SRC:%.cpp=.build/%.o)
+KRPSIM_VERIF_OBJS	:= $(KRPSIM_VERIF_SRC:%.cpp=.build/%.o)
+ALL_OBJS 			:= $(KRPSIM_OBJS) $(KRPSIM_VERIF_OBJS)
+DEPS			 	:= $(ALL_OBJS:%.o=%.d)
+
+# **************************************************************************** #
+#                                TOOLS & FLAGS                                 #
+# **************************************************************************** #
 
 CXX				:=	c++
 CXXFLAGS		:=	-Wall -Wextra -Werror -std=c++17 -g
 CPPFLAGS		:=	-MP -MMD -Iinclude
 LDFLAGS			:=
-
-# **************************************************************************** #
-#                                    TOOLS                                     #
-# **************************************************************************** #
 
 MAKEFLAGS		+= --silent --no-print-directory
 
@@ -27,11 +35,16 @@ MAKEFLAGS		+= --silent --no-print-directory
 #                                   RECIPES                                    #
 # **************************************************************************** #
 
-all: header $(NAME)
+all: header $(KRPSIM) $(KRPSIM_VERIF)
 
-$(NAME): $(SRC_OBJS)
-	$(CXX) $(CXXFLAGS) $(SRC_OBJS) $(LDFLAGS) -o $(NAME)
-	@printf "%b" "$(BLUE)CREATED $(CYAN)$(NAME)\n"
+$(KRPSIM): $(KRPSIM_OBJS)
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+	@printf "%b" "$(BLUE)CREATED $(CYAN)$@\n"
+
+
+$(KRPSIM_VERIF): $(KRPSIM_VERIF_OBJS)
+	$(CXX) $(CXXFLAGS) $^ $(LDFLAGS) -o $@
+	@printf "%b" "$(BLUE)CREATED $(CYAN)$@\n"
 
 .build/%.o: %.cpp
 	mkdir -p $(@D)
@@ -44,8 +57,7 @@ clean:
 	rm -rf .build
 
 fclean: clean
-	rm -rf trees.txt
-	rm -rf $(NAME)
+	rm -rf $(KRPSIM) $(KRPSIM_VERIF) trees.txt
 
 re:
 	$(MAKE) fclean
