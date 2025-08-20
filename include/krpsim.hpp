@@ -15,6 +15,7 @@
 #include <unordered_map>
 #include <fstream>
 #include <cstring>
+#include <iostream>
 
 ///< @brief Represents an item for a process
 struct Item {

@@ -1,5 +1,5 @@
 /*!
- *  @file main.cpp
+ *  @file krpsim.cpp
  *  @brief Main entry point for the krpsim executable.
  *
  *  This file serves as the main entry point for the krpsim executable, which
