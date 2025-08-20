@@ -33,6 +33,17 @@ struct GeneticParameters {
 };
 
 
+/**
+ * @brief Function to delete processes that produce items with stocks exceeding configured limits.
+ *
+ * This function iterates through the runnable list of processes and removes those
+ * that produce stocks exceeding the configured limits, based on the candidate's current stock state.
+ *
+ * @param runnable_list The list of process IDs that are currently runnable.
+ * @param is_runnable A vector indicating whether each process is runnable.
+ * @param cfg The configuration containing the maximum stock limits.
+ * @param candidate The current candidate containing stock information.
+ */
 void delete_high_stock_processes(std::vector<int>& runnable_list,
                                  std::vector<bool>& is_runnable,
                                  const Config& cfg,
@@ -60,8 +71,8 @@ void delete_high_stock_processes(std::vector<int>& runnable_list,
     // mark overfull items
     for (int i = 0; i < item_count; ++i) {
         const int current_stock = candidate.stocks_by_id[i];
-        const int stock_cap = cfg.maxStocks.abs_cap_by_id[i];     // -1 => no cap
-        const double stock_factor = cfg.maxStocks.factor_by_id[i];      // -1 => no cap
+        const int stock_cap = cfg.maxStocks.abs_cap_by_id[i]; // -1 => no cap
+        const double stock_factor = cfg.maxStocks.factor_by_id[i]; // -1 => no cap
 
         bool too_much = false;
         if (!factors_mode && stock_cap >= 0 && current_stock > stock_cap)
@@ -71,7 +82,7 @@ void delete_high_stock_processes(std::vector<int>& runnable_list,
         over[i] = too_much;
     }
 
-    // drop processes whose all results are overfull
+    // helper lambda to check if a process can be dropped
     auto drop = [&](int pid) {
         if (pid < 0)
             return false; // keep wait sentinel
@@ -84,6 +95,7 @@ void delete_high_stock_processes(std::vector<int>& runnable_list,
         return true;
     };
 
+    // drop processes for which all results are overfull
     int non_wait_runnable = -1;
     for (auto it = runnable_list.begin(); it != runnable_list.end();) {
         if (*it < 0) {
@@ -101,6 +113,7 @@ void delete_high_stock_processes(std::vector<int>& runnable_list,
         }
     }
 
+    // if we have no running processes and no runnable processes, we can add back the first non-wait runnable process
     if (candidate.running.empty() && non_wait_runnable != -1 && (runnable_list.empty() || (runnable_list.size() == 1 && runnable_list[0] == -1))) {
         if (!is_runnable[non_wait_runnable]) {
             is_runnable[non_wait_runnable] = true; // mark as runnable
@@ -109,7 +122,6 @@ void delete_high_stock_processes(std::vector<int>& runnable_list,
     }
 
 }
-
 
 
 /**
@@ -206,9 +218,8 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, std
     const int process_count = static_cast<int>(cfg.processes.size());
     std::vector<int> missing;
     std::vector<int> runnable;
-    std::vector<bool>  is_runnable; // keep track of processes in runnable list
+    std::vector<bool> is_runnable; // keep track of processes in runnable list
 
-    // --- init once per child
     missing.assign(process_count, 0);
     is_runnable.assign(process_count, false);
     runnable.clear();
@@ -216,8 +227,8 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, std
 
     for (int pid = 0; pid < process_count; ++pid) {
         const auto& proc = cfg.processes[pid];
-        for (auto [id, q] : proc.needs_by_id)
-            if (child.stocks_by_id[id] < q)
+        for (auto [id, qty] : proc.needs_by_id)
+            if (child.stocks_by_id[id] < qty)
                 ++missing[pid];
         if (missing[pid] == 0) {
             runnable.push_back(pid);
@@ -259,9 +270,9 @@ Candidate generate_child(const Config &cfg, const GeneticParameters &params, std
             is_runnable[first_cycle_process] = true; // Mark it as runnable again
         }
 
-        int random_choice = rand() % 100; // Randomly choose between parent1, parent2 and mutation
+        int random_choice = rand() % 100; // Randomly choose between parent1 action, parent2 action and mutation
 
-        // find parent1.trace[i].procId in runnable_list
+        // parent1.trace[i].procId in runnable_list
         if (i < parent1_size // Check if i is within bounds
             && is_runnable[parent1.value().trace[i].procId]
             && random_choice < 100 - params.mutationRate / 2) // check if we should use parent1

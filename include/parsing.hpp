@@ -30,4 +30,15 @@
  */
 Config parse_config(std::istream &in);
 
+/**
+ * @brief Parse the configuration for simulation purposes.
+ *
+ * This function parses the configuration from an input stream, initializes the distance map for optimization keys,
+ * selects necessary processes, builds item indices and IDs, and prepares the needers_by_item vector.
+ *
+ * @param in The input stream to read the configuration from.
+ * @return A Config object containing the parsed and prepared configuration for simulation.
+ */
+Config parse_config_for_simulation(std::istream &in);
+
 #endif

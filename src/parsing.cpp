@@ -444,6 +444,18 @@ void build_max_stocks(Config &cfg) {
 
 }
 
+
+/**
+ * @brief Get or create an ID for a given string (item name), updating the mapping and vector accordingly.
+ *
+ * This function checks if the string already has an ID in the map. If it does, it returns that ID.
+ * If not, it creates a new ID, adds it to the map and vector, and returns the new ID.
+ *
+ * @param s The string to get or create an ID for.
+ * @param map The mapping from string to ID.
+ * @param vec The vector of strings to maintain order.
+ * @return The ID associated with the string.
+ */
 static int get_or_make_id(const std::string& s,
                           std::unordered_map<std::string,int>& map,
                           std::vector<std::string>& vec) {
@@ -455,6 +467,16 @@ static int get_or_make_id(const std::string& s,
     return id;
 }
 
+
+/**
+ * @brief Build the item index and IDs for the configuration.
+ *
+ * This function populates the item_to_id and id_to_item mappings in the configuration,
+ * ensuring that all items from initial stocks and processes are indexed correctly.
+ * It also fills the needs_by_id and results_by_id vectors in each process.
+ *
+ * @param cfg The configuration to build the item index for.
+ */
 void build_item_index_and_ids(Config& cfg) {
     cfg.item_to_id.clear();
     cfg.id_to_item.clear();
@@ -484,7 +506,6 @@ void build_item_index_and_ids(Config& cfg) {
 }
 
 
-
 Config parse_config(std::istream &in) {
     Config cfg;
     std::string line;
@@ -504,7 +525,8 @@ Config parse_config(std::istream &in) {
                 if (std::regex_match(trimmed, m, detail::re_stock)) {
                     cfg.initialStocks.emplace(m[1].str(), std::stoll(m[2].str()));
                     break;
-                } else if (std::regex_match(trimmed, m, detail::re_process)) {
+                }
+                if (std::regex_match(trimmed, m, detail::re_process)) {
                     section = Section::PROCESSES; // fall‑through to parse as process
                 } else {
                     throw std::runtime_error("Expected stock or process at line " + std::to_string(lineno));
@@ -518,7 +540,8 @@ Config parse_config(std::istream &in) {
                     p.delay = std::stoll(m[4].str());
                     cfg.processes.emplace_back(std::move(p));
                     break;
-                } else if (std::regex_match(trimmed, m, detail::re_optimize)) {
+                }
+                if (std::regex_match(trimmed, m, detail::re_optimize)) {
                     section = Section::OPTIMIZE;
                 } else {
                     throw std::runtime_error("Expected process or optimize at line " + std::to_string(lineno));
@@ -553,6 +576,13 @@ Config parse_config(std::istream &in) {
         process_names.insert(proc.name);
     }
 
+    return cfg;
+}
+
+
+Config parse_config_for_simulation(std::istream &in) {
+    Config cfg = parse_config(in);
+
     // Initialize the distance map for optimization keys
     for (const std::string& goal : cfg.optimizeKeys) {
         if (goal != "time") {
@@ -583,13 +613,6 @@ Config parse_config(std::istream &in) {
     for (size_t pid = 0; pid < cfg.processes.size(); ++pid) {
         for (auto [id, q] : cfg.processes[pid].needs_by_id)
             cfg.needers_by_item[id].emplace_back(pid, q);
-    }
-
-    //print processes in a cycle
-    for (const Process &proc : cfg.processes) {
-        if (proc.in_cycle == true) {
-            std::cout << "Process " << proc.name << " in cycle." << std::endl;
-        }
     }
 
     return cfg;

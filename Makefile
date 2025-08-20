@@ -4,7 +4,7 @@ NAME			:=	krpsim
 #                                 INGREDIENTS                                  #
 # **************************************************************************** #
 
-SRC				:=	src/main.cpp		\
+SRC				:=	src/krpsim.cpp		\
 					src/parsing.cpp		\
 					src/helper.cpp		\
 					src/genetic_algo.cpp	\
