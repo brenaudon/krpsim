@@ -1,0 +1,11 @@
+mental_sanity:20
+
+do_documentary_research:(mental_sanity:2):(knowledge:1):8
+do_parsing:(mental_sanity:5):(parsing:1):10
+do_algorithm:(knowledge:3;mental_sanity:3):(algorithm:1):20
+do_optimization:(knowledge:5;mental_sanity:5):(opti:1):15
+do_verifications:(knowledge:2;parsing:1;mental_sanity:3):(verif:1):8
+do_project:(parsing:1;algorithm:1;opti:1;verif:1):(project:1):5
+take_a_day_off:(knowledge:1):(mental_sanity:20):1
+
+optimize:(project)

@@ -1,0 +1,12 @@
+euro:5
+pot:1
+stove:1
+
+buy_pasta:(euro:2):(pasta:1):1
+buy_sauce:(euro:1):(sauce:1):1
+buy_chicken:(euro:2):(chicken:1):1
+cook_pasta:(pasta:1;pot:1):(cooked_pasta:1:pot:1):10
+cook_chicken:(chicken:1;stove:1):(cooked_chicken:1:stove:1):10
+serve_meal:(cooked_pasta:1;sauce:1;cooked_chicken:1):(meal:1):1
+
+optimize:(meal)
