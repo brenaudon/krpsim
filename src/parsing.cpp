@@ -513,6 +513,8 @@ Config parse_config(std::istream &in) {
 
     enum class Section { STOCKS, PROCESSES, OPTIMIZE } section = Section::STOCKS;
 
+    bool optimize_line_found = false; // Only one optimize line is allowed
+
     while (std::getline(in, line)) {
         ++lineno;
         std::string trimmed(line);
@@ -537,7 +539,7 @@ Config parse_config(std::istream &in) {
                     p.name = trim(m[1].str());
                     p.needs = parse_item_list(m[2].str());
                     p.results = parse_item_list(m[3].str());
-                    p.delay = std::stoll(m[4].str());
+                    p.delay = std::stoi(m[4].str());
                     cfg.processes.emplace_back(std::move(p));
                     break;
                 }
@@ -547,7 +549,8 @@ Config parse_config(std::istream &in) {
                     throw std::runtime_error("Expected process or optimize at line " + std::to_string(lineno));
                 }
             case Section::OPTIMIZE:
-                if (std::regex_match(trimmed, m, detail::re_optimize)) {
+                if (std::regex_match(trimmed, m, detail::re_optimize) && !optimize_line_found) {
+                    optimize_line_found = true;
                     std::string inside = m[1];
                     size_t start = 0;
                     while (start < inside.size()) {
@@ -557,6 +560,8 @@ Config parse_config(std::istream &in) {
                         if (end == std::string::npos) break;
                         start = end + 1;
                     }
+                } else if (optimize_line_found) {
+                    throw std::runtime_error("Multiple optimize lines found at line " + std::to_string(lineno));
                 } else {
                     throw std::runtime_error("Unexpected content after optimize at line " + std::to_string(lineno));
                 }
