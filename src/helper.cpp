@@ -8,24 +8,20 @@
 
 #include "helper.hpp"
 
-///< @brief Trims leading whitespace from a string.
 std::string ltrim(std::string s) {
     auto it = std::find_if_not(s.begin(), s.end(), ::isspace);
     return {it, s.end()};
 }
 
-///< @brief Trims trailing whitespace from a string.
 std::string rtrim(std::string s) {
     auto it = std::find_if_not(s.rbegin(), s.rend(), ::isspace).base();
     return {s.begin(), it};
 }
 
-///< @brief Trims leading and trailing whitespace from a string.
 std::string trim(std::string s) {
     return rtrim(ltrim(s));
 }
 
-///< @brief Prints the configuration details to the console.
 void print_config(const Config &cfg) {
     std::cout << "Stocks (" << cfg.initialStocks.size() << ")\n";
     for (auto &[k, v] : cfg.initialStocks) std::cout << "  - " << k << " : " << v << '\n';
